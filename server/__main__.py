@@ -7,6 +7,7 @@ This module provides a unified interface to run different MCP servers.
 import sys
 from .weather import main as weather_main
 from .server import main as demo_main
+from .gns3_mcp import main as gns3_main
 
 
 def main():
@@ -24,9 +25,11 @@ def main():
         weather_main()
     elif server_type == "demo":
         demo_main()
+    elif server_type == "gns3":
+        gns3_main()
     else:
         print(f"Unknown server type: {server_type}")
-        print("Available server types: weather, demo")
+        print("Available server types: weather, demo, gns3")
         sys.exit(1)
 
 

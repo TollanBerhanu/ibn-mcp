@@ -8,5 +8,6 @@ This package contains various MCP server implementations including:
 
 from .weather import mcp as weather_mcp
 from .server import mcp as demo_mcp
+from .gns3_mcp import mcp as gns3_mcp
 
-__all__ = ["weather_mcp", "demo_mcp"]
+__all__ = ["weather_mcp", "demo_mcp", "gns3_mcp"]
