@@ -20,6 +20,7 @@ This project demonstrates the Model Context Protocol with:
 ### MCP Server
 - Weather forecast tool with latitude/longitude coordinates
 - Weather alerts tool for US states
+- GNS3 network topology creation and management
 - FastMCP implementation for easy tool development
 - National Weather Service API integration
 
@@ -60,6 +61,9 @@ uv run mcp-client server/weather.py
 
 # Or using the demo server
 uv run mcp-client server/server.py
+
+# Or using the GNS3 server
+uv run mcp-client server/gns3_mcp.py
 ```
 
 ### Running the MCP Server
@@ -70,6 +74,12 @@ uv run mcp-server weather
 
 # Run the demo server
 uv run mcp-server demo
+
+# Run the GNS3 server
+uv run mcp-server gns3
+
+# Run the GNS3 demo
+uv run demo_gns3.py
 ```
 
 ### Example Queries
@@ -78,6 +88,9 @@ Once connected, you can ask questions like:
 - "What is the weather in Rexburg, Idaho?"
 - "Get weather alerts for California"
 - "What's the forecast for Washington DC?"
+- "Create a network topology with 3 firewalls and 5 workstations"
+- "List all available GNS3 templates"
+- "Start all nodes in my project"
 
 ## Project Structure
 
@@ -88,7 +101,8 @@ ibn-mcp/
 │   ├── __init__.py
 │   ├── __main__.py           # Server entry point
 │   ├── weather.py            # Weather API server
-│   └── server.py             # Demo server
+│   ├── server.py             # Demo server
+│   └── gns3_mcp.py           # GNS3 network topology server
 ├── __init__.py               # Package initialization
 ├── pyproject.toml            # Project configuration
 ├── README.md                 # This file
@@ -132,6 +146,29 @@ Get weather forecast for a specific location using coordinates.
 
 #### `get_alerts(state: str) -> str`
 Get active weather alerts for a US state (two-letter code).
+
+### GNS3 Tools
+
+#### `connect_to_gns3(server_url: str, username: str, password: str) -> str`
+Connect to a GNS3 server with optional authentication.
+
+#### `list_projects(server_url: str) -> str`
+List all available projects on the GNS3 server.
+
+#### `list_templates(server_url: str) -> str`
+List all available templates on the GNS3 server.
+
+#### `create_simple_topology(project_name: str, firewalls: int, workstations: int, ...) -> str`
+Create a simple network topology with firewalls, workstations, and a switch.
+
+#### `create_custom_topology(project_name: str, topology_description: str) -> str`
+Create a custom topology based on natural language description.
+
+#### `start_project_nodes(project_name: str) -> str`
+Start all nodes in a project.
+
+#### `stop_project_nodes(project_name: str) -> str`
+Stop all nodes in a project.
 
 ## Contributing
 
