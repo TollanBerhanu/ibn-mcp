@@ -46,12 +46,34 @@ class MCPClient:
         tools = response.tools
         print("\nConnected to server with tools:", [tool.name for tool in tools])
 
-    async def process_query(self, query: str) -> str:
+    async def process_query(self, query: str, prev_query: str, prev_response: str) -> str:
         """Process a query using OpenAI and available tools"""
+        
+        # Format chat history as alternating list of queries and responses
+        chat_history = []
+        if prev_query and prev_response:
+            chat_history.append(f"Query: {prev_query}")
+            chat_history.append(f"Response: {prev_response}")
+        
+        # Create the formatted context for the LLM
+        context_parts = []
+        if chat_history:
+            context_parts.append("=== CHAT HISTORY ===")
+            context_parts.extend(chat_history)
+            context_parts.append("=== END CHAT HISTORY ===")
+            context_parts.append("")  # Empty line for separation
+        
+        context_parts.append("=== CURRENT QUERY ===")
+        context_parts.append(query)
+        context_parts.append("=== END CURRENT QUERY ===")
+        
+        # Join all parts with newlines
+        formatted_context = "\n".join(context_parts)
+        
         messages = [
             {
                 "role": "user",
-                "content": query
+                "content": formatted_context
             }
         ]
 
@@ -67,7 +89,7 @@ class MCPClient:
 
         # Initial OpenAI API call
         response = self.openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             max_tokens=1000,
             messages=messages,
             tools=available_tools,
@@ -111,7 +133,7 @@ class MCPClient:
 
                 # Get next response from OpenAI
                 response = self.openai.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-4o-mini",
                     max_tokens=1000,
                     messages=messages,
                 )
@@ -125,15 +147,28 @@ class MCPClient:
         print("\nMCP Client Started!")
         print("Type your queries or 'quit' to exit.")
         
+        conversation_history = []  # List to store alternating queries and responses
+        
         while True:
             try:
                 query = input("\nQuery: ").strip()
-                
                 if query.lower() == 'quit':
                     break
-                    
-                response = await self.process_query(query)
+                
+                # Build context from conversation history
+                prev_query = ""
+                prev_response = ""
+                if len(conversation_history) >= 2:
+                    # Get the last query and response from history
+                    prev_query = conversation_history[-2]  # Second to last item
+                    prev_response = conversation_history[-1]  # Last item
+                
+                response = await self.process_query(query, prev_query, prev_response)
                 print("\n" + response)
+                
+                # Add current query and response to history
+                conversation_history.append(query)
+                conversation_history.append(response)
                     
             except Exception as e:
                 print(f"\nError: {str(e)}")
