@@ -20,7 +20,8 @@ This project demonstrates the Model Context Protocol with:
 ### MCP Server
 - Weather forecast tool with latitude/longitude coordinates
 - Weather alerts tool for US states
-- GNS3 network topology creation and management
+- GNS3 network topology creation and management with complete workflows
+- Environment variable support for easy configuration
 - FastMCP implementation for easy tool development
 - National Weather Service API integration
 
@@ -47,6 +48,11 @@ This project demonstrates the Model Context Protocol with:
    ```bash
    export OPENAI_API_KEY="your-api-key-here"
    # Or create a .env file with: OPENAI_API_KEY=your-api-key-here
+   ```
+
+4. (Optional) Set up your GNS3 server:
+   ```bash
+   export GNS3_SERVER="http://your-gns3-server:port"
    ```
 
 ## Usage
@@ -78,8 +84,8 @@ uv run mcp-server demo
 # Run the GNS3 server
 uv run mcp-server gns3
 
-# Run the GNS3 demo
-uv run demo_gns3.py
+# Test the fix
+uv run test_fix.py
 ```
 
 ### Example Queries
@@ -88,9 +94,11 @@ Once connected, you can ask questions like:
 - "What is the weather in Rexburg, Idaho?"
 - "Get weather alerts for California"
 - "What's the forecast for Washington DC?"
-- "Create a network topology with 3 firewalls and 5 workstations"
+- "Create a topology with 2 firewalls and 4 workstations in project 'My Network'"
+- "Create a VPCS topology with 3 nodes in project 'test-gns3-api'"
 - "List all available GNS3 templates"
-- "Start all nodes in my project"
+- "Start all nodes in project 'My Network'"
+- "Connect to GNS3 server"
 
 ## Project Structure
 
@@ -159,7 +167,16 @@ List all available projects on the GNS3 server.
 List all available templates on the GNS3 server.
 
 #### `create_simple_topology(project_name: str, firewalls: int, workstations: int, ...) -> str`
-Create a simple network topology with firewalls, workstations, and a switch.
+Create a complete network topology with firewalls, workstations, and a switch.
+This tool handles the entire workflow: connection, node creation, linking, and starting.
+
+#### `create_vpcs_topology(project_name: str, vpcs_count: int, vpcs_template: str) -> str`
+Create a simple topology with VPCS nodes connected to a switch.
+Specialized tool for creating VPCS-based networks.
+
+#### `create_vpcs_network(project_name: str, vpcs_count: int) -> str`
+Create a VPCS network with the specified number of VPCS nodes connected to a switch.
+Simplified tool specifically designed for VPCS networks.
 
 #### `create_custom_topology(project_name: str, topology_description: str) -> str`
 Create a custom topology based on natural language description.
