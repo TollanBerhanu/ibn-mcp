@@ -1,734 +1,608 @@
-# """
-# GNS3 MCP Server
-
-# This MCP server provides tools for creating and managing network topologies in GNS3
-# using natural language commands. It wraps the GNS3 API to allow users to describe
-# network topologies in plain English.
-# """
-
-# import os
-# import time
-# import requests
-# from typing import Any, Dict, List, Optional
-# from mcp.server.fastmcp import FastMCP
-
-# # Initialize FastMCP server
-# mcp = FastMCP("gns3")
-
-# # Global session for GNS3 API calls
-# gns3_session = requests.Session()
-# gns3_session.headers.update({
-#     "Accept": "application/json", 
-#     "Content-Type": "application/json"
-# })
-
-# # Default GNS3 server from environment variable
-# DEFAULT_GNS3_SERVER = os.getenv("GNS3_SERVER", "http://172.16.194.129:80")
-
-# def gns3_get(url: str) -> Dict[str, Any]:
-#     """Make a GET request to GNS3 API"""
-#     r = gns3_session.get(url)
-#     r.raise_for_status()
-#     return r.json()
-
-# def gns3_post(url: str, json_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-#     """Make a POST request to GNS3 API"""
-#     r = gns3_session.post(url, json=json_data or {})
-#     r.raise_for_status()
-#     return r.json() if r.text else {}
-
-# def find_project_id(base_url: str, project_name: str) -> str:
-#     """Find project ID by name"""
-#     projects = gns3_get(f"{base_url}/v2/projects")
-#     for p in projects:
-#         if p.get("name") == project_name:
-#             return p["project_id"]
-#     raise ValueError(f"Project named '{project_name}' not found")
-
-# def get_template_map(base_url: str) -> Dict[str, str]:
-#     """Get mapping of template names to IDs"""
-#     templates = gns3_get(f"{base_url}/v2/templates")
-#     return {t.get("name"): t.get("template_id") for t in templates}
-
-# def add_node_from_template(base_url: str, project_id: str, template_id: str, name: str, x: int, y: int) -> Dict[str, Any]:
-#     """Add a node from template"""
-#     url = f"{base_url}/v2/projects/{project_id}/templates/{template_id}"
-#     payload = {"compute_id": "local", "x": x, "y": y, "name": name}
-#     return gns3_post(url, json=payload)
-
-# def link_nodes(base_url: str, project_id: str, node1_id: str, node2_id: str, 
-#                node1_adapter: int = 0, node1_port: int = 0,
-#                node2_adapter: int = 0, node2_port: int = 0) -> Dict[str, Any]:
-#     """Link two nodes together"""
-#     url = f"{base_url}/v2/projects/{project_id}/links"
-#     payload = {
-#         "nodes": [
-#             {"node_id": node1_id, "adapter_number": node1_adapter, "port_number": node1_port},
-#             {"node_id": node2_id, "adapter_number": node2_adapter, "port_number": node2_port},
-#         ]
-#     }
-#     return gns3_post(url, json=payload)
-
-# def start_node(base_url: str, project_id: str, node_id: str) -> bool:
-#     """Start a node"""
-#     url = f"{base_url}/v2/projects/{project_id}/nodes/{node_id}/start"
-#     try:
-#         gns3_post(url)
-#         return True
-#     except requests.HTTPError:
-#         # Some nodes may auto-start or not support /start
-#         return False
-
-# @mcp.tool()
-# async def connect_to_gns3(server_url: Optional[str] = None, 
-#                           username: Optional[str] = None, 
-#                           password: Optional[str] = None) -> str:
-#     """Connect to a GNS3 server and configure authentication.
-#     WARNING: Do NOT use this tool for creating topologies!
-#     Use this tool ONLY when you need to test connectivity or configure authentication.
-#     For creating topologies, use create_simple_topology, create_vpcs_topology, or create_vpcs_network directly.
-    
-#     Args:
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable or http://172.16.194.129:80)
-#         username: Basic auth username (optional)
-#         password: Basic auth password (optional)
-#     """
-#     global gns3_session
-    
-#     # Use provided server URL or default from environment
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-    
-#     # Configure authentication if provided
-#     if username and password:
-#         gns3_session.auth = (username, password)
-    
-#     # Test connection
-#     try:
-#         projects = gns3_get(f"{server_url.rstrip('/')}/v2/projects")
-#         return f"✅ Successfully connected to GNS3 server at {server_url}. Found {len(projects)} projects.\n\n" \
-#                f"💡 For creating topologies, use these tools directly:\n" \
-#                f"- 'create_simple_topology' for firewalls/workstations\n" \
-#                f"- 'create_vpcs_topology' for VPCS networks\n" \
-#                f"- 'create_vpcs_network' for VPCS networks (simplified)\n" \
-#                f"- 'list_projects' to see available projects\n" \
-#                f"- 'list_templates' to see available node templates"
-#     except Exception as e:
-#         return f"❌ Failed to connect to GNS3 server: {str(e)}"
-
-# @mcp.tool()
-# async def list_projects(server_url: Optional[str] = None) -> str:
-#     """List all available projects on the GNS3 server.
-    
-#     Args:
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         projects = gns3_get(f"{server_url.rstrip('/')}/v2/projects")
-#         if not projects:
-#             return "No projects found on the server."
-        
-#         project_list = []
-#         for p in projects:
-#             project_list.append(f"- {p.get('name', 'Unknown')} (ID: {p.get('project_id', 'Unknown')})")
-        
-#         return f"📁 Available projects:\n" + "\n".join(project_list) + \
-#                f"\n\n💡 Use 'create_simple_topology' with one of these project names to create a network!"
-#     except Exception as e:
-#         return f"❌ Error listing projects: {str(e)}"
-
-# @mcp.tool()
-# async def list_templates(server_url: Optional[str] = None) -> str:
-#     """List all available templates on the GNS3 server.
-    
-#     Args:
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         templates = gns3_get(f"{server_url.rstrip('/')}/v2/templates")
-#         if not templates:
-#             return "No templates found on the server."
-        
-#         template_list = []
-#         for t in templates:
-#             template_list.append(f"- {t.get('name', 'Unknown')} (ID: {t.get('template_id', 'Unknown')})")
-        
-#         return f"🔧 Available templates:\n" + "\n".join(template_list) + \
-#                f"\n\n💡 Use 'create_simple_topology' with template names to create a network!"
-#     except Exception as e:
-#         return f"❌ Error listing templates: {str(e)}"
-
-# @mcp.tool()
-# async def create_simple_topology(project_name: str,
-#                                 firewalls: int = 0,
-#                                 workstations: int = 0,
-#                                 firewall_template: str = "Firewall Docker",
-#                                 workstation_template: str = "Workstation Docker",
-#                                 switch_template: str = "Ethernet switch",
-#                                 server_url: Optional[str] = None,
-#                                 start_x: int = 100,
-#                                 start_y: int = 100,
-#                                 x_spacing: int = 180,
-#                                 y_spacing: int = 130,
-#                                 devices_per_row: int = 6,
-#                                 custom_nodes: Optional[str] = None,
-#                                 custom_node_template: Optional[str] = None,
-#                                 custom_node_count: int = 0) -> str:
-#     """Create a complete network topology with various node types and a switch.
-#     This tool handles the entire workflow: connection, node creation, linking, and starting.
-#     No need to call connect_to_gns3 first - this tool handles everything automatically.
-    
-#     Args:
-#         project_name: Name of the existing GNS3 project
-#         firewalls: Number of firewall nodes to create
-#         workstations: Number of workstation nodes to create
-#         firewall_template: Template name for firewall nodes
-#         workstation_template: Template name for workstation nodes
-#         switch_template: Template name for the switch
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#         start_x: Starting X coordinate for layout
-#         start_y: Starting Y coordinate for layout
-#         x_spacing: Horizontal spacing between nodes
-#         y_spacing: Vertical spacing between rows
-#         devices_per_row: Maximum devices per row in the layout
-#         custom_nodes: Name prefix for custom nodes (e.g., "VPCS", "Router")
-#         custom_node_template: Template name for custom nodes
-#         custom_node_count: Number of custom nodes to create
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         base_url = server_url.rstrip('/')
-        
-#         # Step 1: Find project
-#         project_id = find_project_id(base_url, project_name)
-        
-#         # Step 2: Get templates
-#         template_map = get_template_map(base_url)
-#         fw_tid = template_map.get(firewall_template)
-#         ws_tid = template_map.get(workstation_template)
-#         sw_tid = template_map.get(switch_template)
-        
-#         if not fw_tid:
-#             return f"❌ Firewall template '{firewall_template}' not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-#         if not ws_tid:
-#             return f"❌ Workstation template '{workstation_template}' not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-#         if not sw_tid:
-#             return f"❌ Switch template '{switch_template}' not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-        
-#         # Step 3: Create switch
-#         switch_x = start_x + (x_spacing * min(devices_per_row, firewalls + workstations)) // 2
-#         switch_y = start_y
-#         switch_node = add_node_from_template(base_url, project_id, sw_tid, "Core-Switch", switch_x, switch_y)
-#         switch_id = switch_node["node_id"]
-        
-#         # Step 4: Create nodes
-#         created_nodes = []
-#         current_index = 0
-        
-#         def grid_pos(idx):
-#             row = idx // devices_per_row
-#             col = idx % devices_per_row
-#             x = start_x + col * x_spacing
-#             y = start_y + y_spacing * (row + 1)
-#             return x, y
-        
-#         # Create firewalls
-#         for i in range(firewalls):
-#             name = f"FW-{i+1}"
-#             x, y = grid_pos(current_index)
-#             node = add_node_from_template(base_url, project_id, fw_tid, name, x, y)
-#             created_nodes.append((node["node_id"], name))
-#             current_index += 1
-        
-#         # Create workstations
-#         for i in range(workstations):
-#             name = f"WS-{i+1}"
-#             x, y = grid_pos(current_index)
-#             node = add_node_from_template(base_url, project_id, ws_tid, name, x, y)
-#             created_nodes.append((node["node_id"], name))
-#             current_index += 1
-        
-#         # Create custom nodes (e.g., VPCS, Routers, etc.)
-#         if custom_nodes and custom_node_template and custom_node_count > 0:
-#             custom_tid = template_map.get(custom_node_template)
-#             if not custom_tid:
-#                 return f"❌ Custom node template '{custom_node_template}' not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-            
-#             for i in range(custom_node_count):
-#                 name = f"{custom_nodes}-{i+1}"
-#                 x, y = grid_pos(current_index)
-#                 node = add_node_from_template(base_url, project_id, custom_tid, name, x, y)
-#                 created_nodes.append((node["node_id"], name))
-#                 current_index += 1
-        
-#         # Step 5: Link all devices to switch
-#         switch_port = 0
-#         for node_id, name in created_nodes:
-#             link = link_nodes(base_url, project_id, switch_id, node_id, switch_port=switch_port)
-#             switch_port += 1
-#             time.sleep(0.05)  # Small delay to avoid overwhelming server
-        
-#         # Step 6: Start nodes
-#         started = 0
-#         for node_id, name in created_nodes + [(switch_id, "Core-Switch")]:
-#             if start_node(base_url, project_id, node_id):
-#                 started += 1
-        
-#         # Build summary message
-#         summary_parts = []
-#         if firewalls > 0:
-#             summary_parts.append(f"{firewalls} firewalls")
-#         if workstations > 0:
-#             summary_parts.append(f"{workstations} workstations")
-#         if custom_nodes and custom_node_count > 0:
-#             summary_parts.append(f"{custom_node_count} {custom_nodes}")
-        
-#         summary = ", ".join(summary_parts) if summary_parts else "0 devices"
-        
-#         return f"🎉 Successfully created complete topology in project '{project_name}':\n\n" \
-#                f"✅ Created {len(created_nodes)} devices ({summary})\n" \
-#                f"✅ Created 1 switch\n" \
-#                f"✅ Linked all devices to the switch\n" \
-#                f"✅ Started {started} nodes\n\n" \
-#                f"🌐 Your network is now ready! Open GNS3 to see the topology."
-               
-#     except Exception as e:
-#         return f"❌ Error creating topology: {str(e)}"
-
-# @mcp.tool()
-# async def create_vpcs_topology(project_name: str,
-#                               vpcs_count: int = 2,
-#                               vpcs_template: str = "VPCS",
-#                               switch_template: str = "Ethernet switch",
-#                               server_url: Optional[str] = None) -> str:
-#     """Create a simple topology with VPCS nodes connected to a switch.
-#     IMPORTANT: This tool handles EVERYTHING automatically - connection, node creation, linking, and starting.
-#     DO NOT call connect_to_gns3 first. Use this tool directly for VPCS networks.
-    
-#     Args:
-#         project_name: Name of the existing GNS3 project
-#         vpcs_count: Number of VPCS nodes to create
-#         vpcs_template: Template name for VPCS nodes (default: "VPCS")
-#         switch_template: Template name for the switch (default: "Ethernet switch")
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         base_url = server_url.rstrip('/')
-        
-#         # Step 1: Find project
-#         project_id = find_project_id(base_url, project_name)
-        
-#         # Step 2: Get templates
-#         template_map = get_template_map(base_url)
-#         vpcs_tid = template_map.get(vpcs_template)
-#         sw_tid = template_map.get(switch_template)
-        
-#         if not vpcs_tid:
-#             return f"❌ VPCS template '{vpcs_template}' not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-#         if not sw_tid:
-#             return f"❌ Switch template '{switch_template}' not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-        
-#         # Step 3: Create switch
-#         switch_x = 300
-#         switch_y = 100
-#         switch_node = add_node_from_template(base_url, project_id, sw_tid, "Core-Switch", switch_x, switch_y)
-#         switch_id = switch_node["node_id"]
-        
-#         # Step 4: Create VPCS nodes
-#         created_nodes = []
-#         for i in range(vpcs_count):
-#             name = f"VPCS-{i+1}"
-#             x = 100 + (i * 200)  # Spread them horizontally
-#             y = 250
-#             node = add_node_from_template(base_url, project_id, vpcs_tid, name, x, y)
-#             created_nodes.append((node["node_id"], name))
-        
-#         # Step 5: Link all VPCS to switch
-#         switch_port = 0
-#         for node_id, name in created_nodes:
-#             link = link_nodes(base_url, project_id, switch_id, node_id, switch_port=switch_port)
-#             switch_port += 1
-#             time.sleep(0.05)
-        
-#         # Step 6: Start nodes
-#         started = 0
-#         for node_id, name in created_nodes + [(switch_id, "Core-Switch")]:
-#             if start_node(base_url, project_id, node_id):
-#                 started += 1
-        
-#         return f"🎉 Successfully created VPCS topology in project '{project_name}':\n\n" \
-#                f"✅ Created {len(created_nodes)} VPCS nodes\n" \
-#                f"✅ Created 1 switch\n" \
-#                f"✅ Linked all VPCS nodes to the switch\n" \
-#                f"✅ Started {started} nodes\n\n" \
-#                f"🌐 Your VPCS network is now ready! Open GNS3 to see the topology."
-               
-#     except Exception as e:
-#         return f"❌ Error creating VPCS topology: {str(e)}"
-
-# @mcp.tool()
-# async def create_custom_topology(project_name: str,
-#                                 topology_description: str,
-#                                 server_url: Optional[str] = None) -> str:
-#     """Create a custom topology based on a natural language description.
-#     This tool provides guidance for creating complex topologies.
-    
-#     Args:
-#         project_name: Name of the existing GNS3 project
-#         topology_description: Natural language description of the topology to create
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         base_url = server_url.rstrip('/')
-        
-#         # Find project
-#         project_id = find_project_id(base_url, project_name)
-        
-#         # Get available templates
-#         template_map = get_template_map(base_url)
-#         available_templates = list(template_map.keys())
-        
-#         return f"🎯 Custom topology request: '{topology_description}'\n\n" \
-#                f"📋 Available templates for your topology:\n" + \
-#                "\n".join([f"- {template}" for template in available_templates]) + \
-#                f"\n\n💡 Use these specialized tools:\n" \
-#                f"• 'create_simple_topology' for firewalls/workstations\n" \
-#                f"• 'create_vpcs_topology' for VPCS networks\n" \
-#                f"• Or use 'create_simple_topology' with custom_node_template parameter"
-               
-#     except Exception as e:
-#         return f"❌ Error creating custom topology: {str(e)}"
-
-# @mcp.tool()
-# async def create_vpcs_network(project_name: str,
-#                              vpcs_count: int = 2,
-#                              server_url: Optional[str] = None) -> str:
-#     """Create a VPCS network with the specified number of VPCS nodes connected to a switch.
-#     This tool is specifically designed for VPCS networks and handles everything automatically.
-#     Use this tool directly - no need to call connect_to_gns3 first.
-    
-#     Args:
-#         project_name: Name of the existing GNS3 project
-#         vpcs_count: Number of VPCS nodes to create (default: 2)
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         base_url = server_url.rstrip('/')
-        
-#         # Step 1: Find project
-#         project_id = find_project_id(base_url, project_name)
-        
-#         # Step 2: Get templates
-#         template_map = get_template_map(base_url)
-#         vpcs_tid = template_map.get("VPCS")
-#         sw_tid = template_map.get("Ethernet switch")
-        
-#         if not vpcs_tid:
-#             return f"❌ VPCS template not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-#         if not sw_tid:
-#             return f"❌ Ethernet switch template not found.\nAvailable templates: {', '.join(sorted(template_map.keys()))}"
-        
-#         # Step 3: Create switch
-#         switch_x = 300
-#         switch_y = 100
-#         switch_node = add_node_from_template(base_url, project_id, sw_tid, "Core-Switch", switch_x, switch_y)
-#         switch_id = switch_node["node_id"]
-        
-#         # Step 4: Create VPCS nodes
-#         created_nodes = []
-#         for i in range(vpcs_count):
-#             name = f"VPCS-{i+1}"
-#             x = 100 + (i * 200)  # Spread them horizontally
-#             y = 250
-#             node = add_node_from_template(base_url, project_id, vpcs_tid, name, x, y)
-#             created_nodes.append((node["node_id"], name))
-        
-#         # Step 5: Link all VPCS to switch
-#         switch_port = 0
-#         for node_id, name in created_nodes:
-#             link = link_nodes(base_url, project_id, switch_id, node_id, switch_port=switch_port)
-#             switch_port += 1
-#             time.sleep(0.05)
-        
-#         # Step 6: Start nodes
-#         started = 0
-#         for node_id, name in created_nodes + [(switch_id, "Core-Switch")]:
-#             if start_node(base_url, project_id, node_id):
-#                 started += 1
-        
-#         return f"🎉 Successfully created VPCS network in project '{project_name}':\n\n" \
-#                f"✅ Created {len(created_nodes)} VPCS nodes\n" \
-#                f"✅ Created 1 Ethernet switch\n" \
-#                f"✅ Linked all VPCS nodes to the switch\n" \
-#                f"✅ Started {started} nodes\n\n" \
-#                f"🌐 Your VPCS network is now ready! Open GNS3 to see the topology."
-               
-#     except Exception as e:
-#         return f"❌ Error creating VPCS network: {str(e)}"
-
-# @mcp.tool()
-# async def start_project_nodes(project_name: str,
-#                              server_url: Optional[str] = None) -> str:
-#     """Start all nodes in a project.
-    
-#     Args:
-#         project_name: Name of the GNS3 project
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         base_url = server_url.rstrip('/')
-#         project_id = find_project_id(base_url, project_name)
-        
-#         # Get all nodes in the project
-#         nodes = gns3_get(f"{base_url}/v2/projects/{project_id}/nodes")
-        
-#         started_count = 0
-#         for node in nodes:
-#             node_id = node["node_id"]
-#             node_name = node.get("name", "Unknown")
-#             if start_node(base_url, project_id, node_id):
-#                 started_count += 1
-        
-#         return f"🚀 Started {started_count} out of {len(nodes)} nodes in project '{project_name}'"
-        
-#     except Exception as e:
-#         return f"❌ Error starting nodes: {str(e)}"
-
-# @mcp.tool()
-# async def stop_project_nodes(project_name: str,
-#                             server_url: Optional[str] = None) -> str:
-#     """Stop all nodes in a project.
-    
-#     Args:
-#         project_name: Name of the GNS3 project
-#         server_url: GNS3 server URL (defaults to GNS3_SERVER environment variable)
-#     """
-#     if not server_url:
-#         server_url = DEFAULT_GNS3_SERVER
-        
-#     try:
-#         base_url = server_url.rstrip('/')
-#         project_id = find_project_id(base_url, project_name)
-        
-#         # Get all nodes in the project
-#         nodes = gns3_get(f"{base_url}/v2/projects/{project_id}/nodes")
-        
-#         stopped_count = 0
-#         for node in nodes:
-#             node_id = node["node_id"]
-#             node_name = node.get("name", "Unknown")
-#             try:
-#                 url = f"{base_url}/v2/projects/{project_id}/nodes/{node_id}/stop"
-#                 gns3_post(url)
-#                 stopped_count += 1
-#             except requests.HTTPError:
-#                 # Some nodes may not support stop or already be stopped
-#                 pass
-        
-#         return f"⏹️ Stopped {stopped_count} out of {len(nodes)} nodes in project '{project_name}'"
-        
-#     except Exception as e:
-#         return f"❌ Error stopping nodes: {str(e)}"
-
-# def main():
-#     """Entry point for the GNS3 MCP server"""
-#     mcp.run(transport='stdio')
-
-# if __name__ == "__main__":
-#     main()
-
 #!/usr/bin/env python3
-from typing import Any, Dict, Optional
-import time
+"""
+GNS3 MCP Server — FastMCP + async httpx
+
+Tools included:
+- get_project, get_projects
+- get_template, get_templates
+- get_node, get_nodes
+- get_link, get_links
+- start_node, stop_node, reload_node, suspend_node
+- start_all_nodes, stop_all_nodes
+- node_summary, node_inventory, link_summary
+- create_node_from_template
+- link_nodes
+
+Design:
+- Pure STDIO MCP (no prints to stdout).
+- Optional HTTP Basic auth (user/password).
+- Timeouts and clear exceptions.
+- Docstrings explicitly describe purpose, param types, accepted forms, and examples.
+
+Implementation references:
+- REST shapes & summaries mirror the behavior in the legacy wrapper (projects/nodes/links, node actions, inventory/summary helpers).
+- FastMCP patterns match the weather MCP example (async tools, type hints, docstrings, stdio run).
+"""
+from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple, Union
 import httpx
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("gns3")
 
-# ---------- HTTP helpers ----------
-def _client(user: Optional[str], password: Optional[str]) -> httpx.Client:
-    auth = (user, password) if user and password else None
-    return httpx.Client(auth=auth, headers={"Accept": "application/json", "Content-Type": "application/json"}, timeout=30.0)
+# ------------------------------ HTTP helpers ------------------------------
 
-def gns3_get(c: httpx.Client, url: str) -> Dict[str, Any]:
-    r = c.get(url); r.raise_for_status(); return r.json()
+def _auth(user: Optional[str], password: Optional[str]) -> Optional[tuple[str, str]]:
+    return (user, password) if user and password else None
 
-def gns3_post(c: httpx.Client, url: str, json: Optional[dict] = None) -> Dict[str, Any]:
-    r = c.post(url, json=json or {}); r.raise_for_status(); return r.json() if r.text else {}
+def _base(server: str) -> str:
+    return f"{server.rstrip('/')}/v2"
 
-# ---------- Core ops (adapted from your CLI script) ----------
-def find_project_id(c: httpx.Client, base: str, project_name: str) -> str:
-    for p in gns3_get(c, f"{base}/v2/projects"):
-        if p.get("name") == project_name:
-            return p["project_id"]
-    raise ValueError(f"Project '{project_name}' not found at {base}/v2/projects")
+async def _aget(c: httpx.AsyncClient, url: str) -> Any:
+    r = await c.get(url)
+    r.raise_for_status()
+    return r.json()
 
-def get_template_map(c: httpx.Client, base: str) -> Dict[str, str]:
-    templates = gns3_get(c, f"{base}/v2/templates")
-    return {t.get("name"): t.get("template_id") for t in templates}
+async def _apost(c: httpx.AsyncClient, url: str, json: Optional[dict] = None) -> Any:
+    r = await c.post(url, json=json or {})
+    r.raise_for_status()
+    return r.json() if r.text else {}
 
-def add_node_from_template(c: httpx.Client, base: str, project_id: str, template_id: str, name: str, x: int, y: int) -> Dict[str, Any]:
-    node = gns3_post(c, f"{base}/v2/projects/{project_id}/templates/{template_id}", json={"compute_id": "local", "x": x, "y": y, "name": name})
-    node_id = node.get("node_id")
-    if not node_id:
-        raise RuntimeError(f"Failed to create node from template {template_id}: {node}")
-    return node
+# ------------------------------ Core getters ------------------------------
 
-def link_to_switch(c: httpx.Client, base: str, project_id: str, switch_id: str, device_id: str, switch_port: int,
-                   device_adapter: int = 0, device_port: int = 0, switch_adapter: int = 0) -> Dict[str, Any]:
-    payload = {
-        "nodes": [
-            {"node_id": device_id, "adapter_number": device_adapter, "port_number": device_port},
-            {"node_id": switch_id, "adapter_number": switch_adapter, "port_number": switch_port},
-        ]
-    }
-    return gns3_post(c, f"{base}/v2/projects/{project_id}/links", json=payload)
+async def _projects(c: httpx.AsyncClient, base: str) -> List[dict]:
+    return await _aget(c, f"{base}/projects")
 
-def start_node(c: httpx.Client, base: str, project_id: str, node_id: str) -> bool:
+async def _project_by_name_or_id(c: httpx.AsyncClient, base: str,
+                                 *, name: Optional[str], project_id: Optional[str]) -> dict:
+    if project_id:
+        return await _aget(c, f"{base}/projects/{project_id}")
+    if name:
+        for p in await _projects(c, base):
+            if p.get("name") == name:
+                return p
+        raise ValueError(f"Project not found: {name}")
+    raise ValueError("Provide either 'name' or 'project_id'.")
+
+
+async def _templates(c: httpx.AsyncClient, base: str) -> List[dict]:
+    return await _aget(c, f"{base}/templates")
+
+async def _template_by_name_or_id(c: httpx.AsyncClient, base: str,
+                                  *, name: Optional[str], template_id: Optional[str]) -> dict:
+    if template_id:
+        return await _aget(c, f"{base}/templates/{template_id}")
+    if name:
+        for t in await _templates(c, base):
+            if t.get("name") == name:
+                return t
+        raise ValueError(f"Template not found: {name}")
+    raise ValueError("Provide either 'name' or 'template_id'.")
+
+async def _nodes(c: httpx.AsyncClient, base: str, project_id: str) -> List[dict]:
+    return await _aget(c, f"{base}/projects/{project_id}/nodes")
+
+async def _node(c: httpx.AsyncClient, base: str, project_id: str, node_id: str) -> dict:
+    return await _aget(c, f"{base}/projects/{project_id}/nodes/{node_id}")
+
+async def _links(c: httpx.AsyncClient, base: str, project_id: str) -> List[dict]:
+    return await _aget(c, f"{base}/projects/{project_id}/links")
+
+async def _link(c: httpx.AsyncClient, base: str, project_id: str, link_id: str) -> dict:
+    return await _aget(c, f"{base}/projects/{project_id}/links/{link_id}")
+
+# ------------------------------ Node actions ------------------------------
+
+async def _node_action(c: httpx.AsyncClient, base: str, project_id: str, node_id: str, action: str) -> dict:
+    # POST /projects/{project_id}/nodes/{node_id}/{action}
+    return await _apost(c, f"{base}/projects/{project_id}/nodes/{node_id}/{action}")
+
+async def _project_nodes_action(c: httpx.AsyncClient, base: str, project_id: str, action: str) -> None:
+    # POST /projects/{project_id}/nodes/{action}
+    await _apost(c, f"{base}/projects/{project_id}/nodes/{action}")
+
+# ------------------------------ Summaries --------------------------------
+
+def _nodes_summary(nodes: List[dict]) -> List[Tuple[str, str, Optional[int], str]]:
+    """
+    [(name, status, console_port, node_id)] — mirrors legacy nodes_summary.
+    """
+    out: List[Tuple[str, str, Optional[int], str]] = []
+    for n in nodes:
+        out.append((n.get("name"), n.get("status"), n.get("console"), n.get("node_id")))
+    return out
+
+def _nodes_inventory(server_host: str, nodes: List[dict]) -> Dict[str, dict]:
+    """
+    Inventory keyed by node name — mirrors legacy nodes_inventory:
+    { name: {server, name, console_port, console_type, type, template} }
+    """
+    inv: Dict[str, dict] = {}
+    for n in nodes:
+        inv[n["name"]] = {
+            "server": server_host,
+            "name": n["name"],
+            "console_port": n.get("console"),
+            "console_type": n.get("console_type"),
+            "type": n.get("node_type"),
+            "template": n.get("template"),
+        }
+    return inv
+
+def _links_summary(nodes: List[dict], links: List[dict]) -> List[Tuple[str, str, str, str]]:
+    """
+    [(node_a, port_name_a, node_b, port_name_b)] — resolves adapter/port to port name
+    using node.ports[]. Mirrors legacy link summary behavior.
+    """
+    node_by_id = {n["node_id"]: n for n in nodes}
+    port_name_map = {}
+    for n in nodes:
+        mapping = {}
+        for p in n.get("ports", []) or []:
+            mapping[(p.get("adapter_number"), p.get("port_number"))] = p.get("name")
+        port_name_map[n["node_id"]] = mapping
+
+    out: List[Tuple[str, str, str, str]] = []
+    for l in links:
+        if not l.get("nodes"):
+            continue
+        a, b = l["nodes"][0], l["nodes"][1]
+        na, nb = node_by_id.get(a["node_id"]), node_by_id.get(b["node_id"])
+        if not na or not nb:
+            continue
+        pa = port_name_map.get(na["node_id"], {}).get((a.get("adapter_number"), a.get("port_number")),
+                                                      f"{a.get('adapter_number')}/{a.get('port_number')}")
+        pb = port_name_map.get(nb["node_id"], {}).get((b.get("adapter_number"), b.get("port_number")),
+                                                      f"{b.get('adapter_number')}/{b.get('port_number')}")
+        out.append((na.get("name"), pa, nb.get("name"), pb))
+    return out
+
+# ------------------------------ Tools ------------------------------------
+
+@mcp.tool()
+async def get_projects(server: str, user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """List all GNS3 projects on a server.
+
+    Args:
+        server: Base URL of the GNS3 server, e.g. "http://127.0.0.1:3080".
+        user: Optional HTTP Basic username.
+        password: Optional HTTP Basic password.
+
+    Returns:
+        {"projects": [...]} where each item is a project dict from /v2/projects.
+
+    Example:
+        "List projects on http://172.16.194.129:80"
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return {"projects": await _projects(c, base)}
+
+@mcp.tool()
+async def get_project(server: str,
+                      name: Optional[str] = None,
+                      project_id: Optional[str] = None,
+                      user: Optional[str] = None,
+                      password: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch a single project by name or ID.
+
+    You must provide exactly one of (name, project_id).
+
+    Args:
+        server: GNS3 base URL, e.g. "http://127.0.0.1:3080".
+        name: Project name to search for (exact match).
+        project_id: Project UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Project dict from /v2/projects/{id} (or the match by name).
+
+    Example:
+        "Get the project named test-gns3-api on http://172.16.194.129:80"
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return await _project_by_name_or_id(c, base, name=name, project_id=project_id)
+
+@mcp.tool()
+async def get_templates(server: str, user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, str]:
+    """List templates as {name -> template_id}.
+
+    Args:
+        server: GNS3 base URL.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Mapping from template name to template_id.
+
+    Example:
+        "Show templates on http://172.16.194.129:80"
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        t = await _templates(c, base)
+        return {x.get("name"): x.get("template_id") for x in t}
+
+@mcp.tool()
+async def get_template(server: str,
+                       name: Optional[str] = None,
+                       template_id: Optional[str] = None,
+                       user: Optional[str] = None,
+                       password: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch a single template by name or ID.
+
+    You must provide exactly one of (name, template_id).
+
+    Args:
+        server: GNS3 base URL.
+        name: Template name (exact).
+        template_id: Template UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Template dict from /v2/templates/{id}.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return await _template_by_name_or_id(c, base, name=name, template_id=template_id)
+
+@mcp.tool()
+async def get_nodes(server: str, project_id: str,
+                    user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """List all nodes in a project.
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        {"nodes": [...]} where each item is a node dict from /v2/projects/{id}/nodes.
+
+    Example:
+        "List nodes for project <PROJECT_ID> on http://172.16.194.129:80"
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return {"nodes": await _nodes(c, base, project_id)}
+
+@mcp.tool()
+async def get_node(server: str, project_id: str, node_id: str,
+                   user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch a single node by ID.
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        node_id: Node UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Node dict from /v2/projects/{project_id}/nodes/{node_id}.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return await _node(c, base, project_id, node_id)
+
+@mcp.tool()
+async def get_links(server: str, project_id: str,
+                    user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """List all links in a project.
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        {"links": [...]} where each item is a link dict from /v2/projects/{id}/links.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return {"links": await _links(c, base, project_id)}
+
+@mcp.tool()
+async def get_link(server: str, project_id: str, link_id: str,
+                   user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch a single link by ID.
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        link_id: Link UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Link dict from /v2/projects/{project_id}/links/{link_id}.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return await _link(c, base, project_id, link_id)
+
+@mcp.tool()
+async def start_node(server: str, project_id: str, node_id: str,
+                     user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """Start a node.
+
+    POST /v2/projects/{project_id}/nodes/{node_id}/start
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        node_id: Node UUID.
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Result dict from the server (often includes updated node status).
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=60.0) as c:
+        return await _node_action(c, base, project_id, node_id, "start")
+
+@mcp.tool()
+async def stop_node(server: str, project_id: str, node_id: str,
+                    user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """Stop a node.
+
+    POST /v2/projects/{project_id}/nodes/{node_id}/stop
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=60.0) as c:
+        return await _node_action(c, base, project_id, node_id, "stop")
+
+@mcp.tool()
+async def reload_node(server: str, project_id: str, node_id: str,
+                      user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """Reload a node.
+
+    POST /v2/projects/{project_id}/nodes/{node_id}/reload
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=60.0) as c:
+        return await _node_action(c, base, project_id, node_id, "reload")
+
+@mcp.tool()
+async def suspend_node(server: str, project_id: str, node_id: str,
+                       user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    """Suspend a node.
+
+    POST /v2/projects/{project_id}/nodes/{node_id}/suspend
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=60.0) as c:
+        return await _node_action(c, base, project_id, node_id, "suspend")
+
+@mcp.tool()
+async def start_all_nodes(server: str, project_id: str,
+                          user: Optional[str] = None, password: Optional[str] = None) -> str:
+    """Start all nodes in a project.
+
+    POST /v2/projects/{project_id}/nodes/start
+
+    Returns:
+        "OK" on success.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=120.0) as c:
+        await _project_nodes_action(c, base, project_id, "start")
+        return "OK"
+
+@mcp.tool()
+async def stop_all_nodes(server: str, project_id: str,
+                         user: Optional[str] = None, password: Optional[str] = None) -> str:
+    """Stop all nodes in a project.
+
+    POST /v2/projects/{project_id}/nodes/stop
+
+    Returns:
+        "OK" on success.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=120.0) as c:
+        await _project_nodes_action(c, base, project_id, "stop")
+        return "OK"
+
+@mcp.tool()
+async def node_summary(server: str, project_id: str,
+                       user: Optional[str] = None, password: Optional[str] = None
+                       ) -> List[Tuple[str, str, Optional[int], str]]:
+    """Return node summary tuples for a project.
+
+    Format:
+        (name, status, console_port, node_id)
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+
+    Example:
+        "Summarize nodes (name, status, console, id) for <PROJECT_ID> on http://..."
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        return _nodes_summary(await _nodes(c, base, project_id))
+
+@mcp.tool()
+async def node_inventory(server: str, project_id: str,
+                         user: Optional[str] = None, password: Optional[str] = None
+                         ) -> Dict[str, dict]:
+    """Return an inventory dict keyed by node name.
+
+    Each value includes: server, name, console_port, console_type, type, template.
+
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+    """
+    base = _base(server)
+    # cheap host parse; avoids extra deps
     try:
-        gns3_post(c, f"{base}/v2/projects/{project_id}/nodes/{node_id}/start")
-        return True
-    except httpx.HTTPStatusError:
-        # Some nodes (e.g., Ethernet switch) may auto‑start or not support /start
-        return False
+        server_host = server.split("://", 1)[1].split("/", 1)[0].split(":")[0]
+    except Exception:
+        server_host = "unknown"
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        nodes = await _nodes(c, base, project_id)
+        return _nodes_inventory(server_host, nodes)
 
-# ---------- Tools ----------
 @mcp.tool()
-def list_projects(server: str, user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
-    """List GNS3 projects on the server.
+async def link_summary(server: str, project_id: str,
+                       user: Optional[str] = None, password: Optional[str] = None
+                       ) -> List[Tuple[str, str, str, str]]:
+    """Return link summary tuples for a project.
+
+    Format:
+        (node_a, port_name_a, node_b, port_name_b)
 
     Args:
-        server: GNS3 base URL, e.g. "http://127.0.0.1:3080"
-        user: HTTP basic auth username if required
-        password: HTTP basic auth password if required
+        server: GNS3 base URL.
+        project_id: Project UUID.
     """
-    base = server.rstrip("/")
-    with _client(user, password) as c:
-        return {"projects": gns3_get(c, f"{base}/v2/projects")}
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=30.0) as c:
+        nodes = await _nodes(c, base, project_id)
+        links = await _links(c, base, project_id)
+        return _links_summary(nodes, links)
+
+# -------------------- Topology building helpers (NEW) --------------------
 
 @mcp.tool()
-def list_templates(server: str, user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, str]:
-    """List available template names -> template IDs.
-
-    Args:
-        server: GNS3 base URL
-        user: HTTP basic auth username if required
-        password: HTTP basic auth password if required
-    """
-    base = server.rstrip("/")
-    with _client(user, password) as c:
-        return get_template_map(c, base)
-
-@mcp.tool()
-def create_topology(
+async def create_node_from_template(
     server: str,
-    project: str,
-    firewall_template: str,
-    workstation_template: str,
-    switch_template: str = "Ethernet switch",
-    firewalls: int = 2,
-    workstations: int = 3,
-    x0: int = 100,
-    y0: int = 100,
-    xstep: int = 180,
-    ystep: int = 130,
-    per_row: int = 6,
+    project_id: str,
+    template: Optional[str] = None,
+    template_id: Optional[str] = None,
+    name: Optional[str] = None,
+    x: int = 0,
+    y: int = 0,
+    compute_id: str = "local",
     user: Optional[str] = None,
     password: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a simple grid topology and link all devices to one switch, then start them.
+    """Create a single node from a template and place it at (x, y).
+
+    You must provide exactly one of (template, template_id).
 
     Args:
-        server: GNS3 base URL (e.g., "http://127.0.0.1:3080")
-        project: Existing project name
-        firewall_template: Template name for firewalls (exact)
-        workstation_template: Template name for workstations (exact)
-        switch_template: Template name for the switch (default "Ethernet switch")
-        firewalls: Number of firewall nodes
-        workstations: Number of workstation nodes
-        x0, y0, xstep, ystep, per_row: Layout controls
-        user, password: Optional HTTP basic auth
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        template: Template name (exact), e.g. "Ethernet switch".
+        template_id: Template UUID (if you already know it).
+        name: Optional node name override (server will assign default if omitted).
+        x, y: Canvas coordinates.
+        compute_id: Target compute; defaults to "local".
+        user, password: Optional HTTP Basic auth.
+
+    Returns:
+        Created node dict from POST /v2/projects/{project_id}/templates/{template_id}.
+
+    Notes:
+        - If only `template` is provided, the server will look up its template_id first.
+        - After creation, you can reposition with PUT /nodes/{node_id} if needed.
+
+    Example:
+        "Create a node from the 'Ethernet switch' template named Core-SW at (200,100) in <PROJECT_ID>"
     """
-    base = server.rstrip("/")
-    with _client(user, password) as c:
-        project_id = find_project_id(c, base, project)
-        tmap = get_template_map(c, base)
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=60.0) as c:
+        if not template_id:
+            if not template:
+                raise ValueError("Provide either template or template_id")
+            t = await _template_by_name_or_id(c, base, name=template, template_id=None)
+            template_id = t["template_id"]
 
-        def _ensure(name: str) -> str:
-            if name not in tmap:
-                raise ValueError(f"Template '{name}' not found. Available: {sorted(tmap.keys())}")
-            return tmap[name]
+        payload = {"compute_id": compute_id, "x": x, "y": y}
+        if name:
+            payload["name"] = name
 
-        fw_tid = _ensure(firewall_template)
-        ws_tid = _ensure(workstation_template)
-        sw_tid = _ensure(switch_template)
+        node = await _apost(c, f"{base}/projects/{project_id}/templates/{template_id}", json=payload)
+        return node
 
-        # Place switch centered above the grid
-        total_devices = int(firewalls) + int(workstations)
-        switch_x = x0 + (xstep * min(per_row, total_devices)) // 2
-        switch_y = y0
-        switch_node = add_node_from_template(c, base, project_id, sw_tid, "Core-Switch", switch_x, switch_y)
-        switch_id = switch_node["node_id"]
+@mcp.tool()
+async def link_nodes(
+    server: str,
+    project_id: str,
+    # Form A: by node names + port names (recommended for humans)
+    node_a_name: Optional[str] = None,
+    port_a_name: Optional[str] = None,
+    node_b_name: Optional[str] = None,
+    port_b_name: Optional[str] = None,
+    # Form B: by node IDs + adapter/port numbers (for programmatic callers)
+    node_a_id: Optional[str] = None,
+    a_adapter: Optional[int] = None,
+    a_port: Optional[int] = None,
+    node_b_id: Optional[str] = None,
+    b_adapter: Optional[int] = None,
+    b_port: Optional[int] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a link between two nodes.
 
-        def grid_pos(i: int) -> tuple[int, int]:
-            row, col = divmod(i, per_row)
-            return x0 + col * xstep, y0 + ystep * (row + 1)
+    Choose ONE form:
 
-        created = []
-        idx = 0
-        for i in range(firewalls):
-            name = f"FW-{i+1}"
-            x, y = grid_pos(idx); idx += 1
-            n = add_node_from_template(c, base, project_id, fw_tid, name, x, y)
-            created.append({"name": name, "node_id": n["node_id"], "x": x, "y": y})
+    Form A (friendly): identify endpoints by node name + port name
+        - node_a_name, port_a_name, node_b_name, port_b_name
+        - Port name must match the node's port 'name' attribute.
 
-        for i in range(workstations):
-            name = f"WS-{i+1}"
-            x, y = grid_pos(idx); idx += 1
-            n = add_node_from_template(c, base, project_id, ws_tid, name, x, y)
-            created.append({"name": name, "node_id": n["node_id"], "x": x, "y": y})
+    Form B (explicit): identify endpoints by node_id + adapter_number/port_number
+        - node_a_id, a_adapter, a_port, node_b_id, b_adapter, b_port
 
-        # Link each device to the switch on successive ports
-        port = 0
-        links = []
-        for n in created:
-            links.append(link_to_switch(c, base, project_id, switch_id, n["node_id"], port))
-            port += 1
-            time.sleep(0.05)  # small pacing
+    Args:
+        server: GNS3 base URL.
+        project_id: Project UUID.
+        user, password: Optional HTTP Basic auth.
 
-        # Start nodes (switch may ignore /start)
-        started = 0
-        for n in created + [{"name": "Core-Switch", "node_id": switch_id}]:
-            if start_node(c, base, project_id, n["node_id"]):
-                started += 1
+    Returns:
+        Link dict from POST /v2/projects/{project_id}/links.
 
-        return {
-            "project_id": project_id,
-            "switch_id": switch_id,
-            "devices_created": len(created),
-            "nodes_started": started,
-            "links_created": len(links),
+    Examples:
+        A) "Link 'FW-1' Gi0/0 to 'SW-1' Ethernet1 in <PROJECT_ID>"
+        B) "Link node A (id=...) adapter 0/port 0 to node B (id=...) adapter 0/port 1"
+
+    Notes:
+        - This mirrors the legacy behavior: we resolve names to IDs and port numbers
+          when Form A is used, and we detect busy ports when possible.
+    """
+    base = _base(server)
+    async with httpx.AsyncClient(auth=_auth(user, password), timeout=60.0) as c:
+        # Resolve Form A (names) if provided
+        def _by_name(nodes: List[dict], n: str) -> dict:
+            for x in nodes:
+                if x.get("name") == n:
+                    return x
+            raise ValueError(f"Node not found by name: {n}")
+
+        if node_a_name or node_b_name:
+            if not (node_a_name and port_a_name and node_b_name and port_b_name):
+                raise ValueError("Form A requires node_a_name, port_a_name, node_b_name, port_b_name")
+            nodes = await _nodes(c, base, project_id)
+            a = _by_name(nodes, node_a_name)
+            b = _by_name(nodes, node_b_name)
+
+            def _port_lookup(node: dict, wanted: str) -> tuple[int, int]:
+                for p in node.get("ports", []) or []:
+                    if p.get("name") == wanted:
+                        return int(p.get("adapter_number")), int(p.get("port_number"))
+                raise ValueError(f"Port name not found on {node.get('name')}: {wanted}")
+
+            a_adapter, a_port = _port_lookup(a, port_a_name)
+            b_adapter, b_port = _port_lookup(b, port_b_name)
+            node_a_id, node_b_id = a["node_id"], b["node_id"]
+
+        # Validate Form B fields
+        if not (node_a_id and node_b_id and a_adapter is not None and a_port is not None and
+                b_adapter is not None and b_port is not None):
+            raise ValueError("Provide either Form A (names) OR Form B (ids+adapter/port).")
+
+        payload = {
+            "nodes": [
+                {"node_id": node_a_id, "adapter_number": int(a_adapter), "port_number": int(a_port)},
+                {"node_id": node_b_id, "adapter_number": int(b_adapter), "port_number": int(b_port)},
+            ]
         }
+        return await _apost(c, f"{base}/projects/{project_id}/links", json=payload)
+
+# ------------------------------ Entrypoint --------------------------------
 
 def main():
     mcp.run(transport="stdio")
