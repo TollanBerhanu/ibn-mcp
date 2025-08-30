@@ -6,7 +6,7 @@ This module provides a unified interface to run different MCP servers.
 
 import sys
 from .weather import main as weather_main
-from .server import main as demo_main
+from .demo import main as demo_main
 from .gns3_mcp import main as gns3_main
 
 
