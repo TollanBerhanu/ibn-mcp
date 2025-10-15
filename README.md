@@ -1,207 +1,76 @@
-# IBN MCP - Model Context Protocol Client and Server
+# Intent-Based Networking Demo
 
-A unified repository containing both an MCP (Model Context Protocol) client and server implementation with weather API integration.
+This project is a lightweight intent-based networking (IBN) workflow tailored for a GNS3 lab. It focuses on clarity over scale: a single CLI walks an intent through translation, feasibility checks, activation via telnet, and assurance testing.
 
-## Overview
+## What the pipeline does
 
-This project demonstrates the Model Context Protocol with:
-- **MCP Client**: Connects to MCP servers and uses OpenAI's API for reasoning and tool calling
-- **MCP Server**: Provides weather-related tools including forecasts and alerts
-- **Weather Integration**: Uses the National Weather Service API for real-time weather data
+- **Inventory capture** – talks to the GNS3 REST API to cache node IDs, console ports, and links for the current topology.
+- **Intent translation** – sends the natural-language goal and topology context to OpenAI, producing a structured policy entry.
+- **Intent resolution** – validates that the policy only references available devices and that each step/test is actionable.
+- **Intent activation** – connects to GNS3 node consoles over telnet and executes the enforcement commands listed in the policy.
+- **Intent assurance** – reuses telnet sessions to run validation commands and checks outputs against success criteria.
 
-## Features
+Every stage appends its results to the YAML policy store so you can review or tweak the policy between runs.
 
-### MCP Client
-- Connects to MCP servers over stdio transport
-- Integrates with OpenAI's GPT models for intelligent reasoning
-- Maps MCP tools to OpenAI function-calling schema
-- Interactive chat interface for querying tools
+## Getting started
 
-### MCP Server
-- Weather forecast tool with latitude/longitude coordinates
-- Weather alerts tool for US states
-- GNS3 network topology creation and management with complete workflows
-- Environment variable support for easy configuration
-- FastMCP implementation for easy tool development
-- National Weather Service API integration
-
-## Prerequisites
-
-- Python 3.12+
-- OpenAI API key (set as `OPENAI_API_KEY` environment variable)
-- Dependencies managed with `uv` (recommended) or pip
-
-## Installation
-
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd ibn-mcp
-   ```
-
-2. Install dependencies:
+1. **Install dependencies** (uses `uv`, but pip works too):
    ```bash
    uv sync
    ```
 
-3. Set up your OpenAI API key:
-   ```bash
-   export OPENAI_API_KEY="your-api-key-here"
-   # Or create a .env file with: OPENAI_API_KEY=your-api-key-here
+2. **Configure credentials** in `.env` (already present in this repo):
+   ```ini
+   OPENAI_API_KEY=...
+   OPENAI_MODEL=gpt-5
+   GNS3_SERVER_IP=...
+   GNS3_SERVER_PORT=...
+   GNS3_SERVER_USER=...
+   GNS3_SERVER_PASSWORD=...
    ```
 
-4. (Optional) Set up your GNS3 server:
+3. **Collect inventory** from the running GNS3 project:
    ```bash
-   export GNS3_SERVER="http://your-gns3-server:port"
+   uv run python -m intent_pipeline.run_cycle --refresh-inventory
    ```
+   This writes `inventory/gns3_inventory.json`. Re-run with an intent afterward.
 
-## Usage
-
-### Running the MCP Client
-
-The client can connect to any MCP server script:
+## Running an intent end to end
 
 ```bash
-# Using the included weather server
-uv run mcp-client server/weather.py
-
-# Or using the demo server
-uv run mcp-client server/server.py
-
-# Or using the GNS3 server
-uv run mcp-client server/gns3_mcp.py
+uv run python -m intent_pipeline.run_cycle --intent "Block east LAN from west LAN"
 ```
 
-### Running the MCP Server
+The CLI prints progress for each stage:
 
-```bash
-# Run the weather server
-uv run mcp-server weather
+1. **translate** – generates `policies/ibn_policies.yaml` entry.
+2. **resolve** – fails fast if devices are missing or if commands/tests are empty.
+3. **activate** – pushes telnet commands; logs captured output in the policy entry.
+4. **assure** – replays validation checks; marks the policy as satisfied or explains failures.
 
-# Run the demo server
-uv run mcp-server demo
+Flags:
 
-# Run the GNS3 server
-uv run mcp-server gns3
+- `--policy-id` – operate on an existing policy without re-translating.
+- `--refresh-inventory` – rebuild cached inventory before running.
+- `--skip-activation` / `--skip-assurance` – stop after the previous stage.
 
-# Test the fix
-uv run test_fix.py
-```
+## Files of interest
 
-### Example Queries
+- `topology.yaml` – static, human-authored topology context.
+- `inventory/gns3_inventory.json` – cached details from the GNS3 API.
+- `policies/ibn_policies.yaml` – accumulated policies with stage status, logs, and test results.
+- `intent_pipeline/` – Python modules for each stage.
 
-Once connected, you can ask questions like:
-- "What is the weather in Rexburg, Idaho?"
-- "Get weather alerts for California"
-- "What's the forecast for Washington DC?"
-- "Create a topology with 2 firewalls and 4 workstations in project 'My Network'"
-- "Create a VPCS topology with 3 nodes in project 'test-gns3-api'"
-- "List all available GNS3 templates"
-- "Start all nodes in project 'My Network'"
-- "Connect to GNS3 server"
+## Telnet notes
 
-## Project Structure
+The telnet helper sends newline-separated commands and collects eager output. It assumes prompts ending with `#`, `>`, or `$`; adjust `intent_pipeline/telnet_executor.py` if your node shells differ. If a device exposes its console on `0.0.0.0`, the CLI falls back to the configured GNS3 host.
 
-```
-ibn-mcp/
-├── client.py                 # MCP client implementation
-├── server/
-│   ├── __init__.py
-│   ├── __main__.py           # Server entry point
-│   ├── weather.py            # Weather API server
-│   ├── server.py             # Demo server
-│   └── gns3_mcp.py           # GNS3 network topology server
-├── __init__.py               # Package initialization
-├── pyproject.toml            # Project configuration
-├── README.md                 # This file
-└── .gitignore
-```
+## Development tips
 
-## Development
-
-### Setting up development environment
-
-```bash
-# Install with development dependencies
-uv sync --extra dev
-
-# Run tests
-uv run pytest
-
-# Format code
-uv run black src/ tests/
-uv run isort src/ tests/
-
-# Lint code
-uv run flake8 src/ tests/
-```
-
-### Adding New Tools
-
-To add new tools to the server:
-
-1. Create a new function in the appropriate server file
-2. Decorate it with `@mcp.tool()`
-3. Add proper type hints and docstrings
-4. The client will automatically discover and use the new tool
-
-## API Reference
-
-### Weather Tools
-
-#### `get_forecast(latitude: float, longitude: float) -> str`
-Get weather forecast for a specific location using coordinates.
-
-#### `get_alerts(state: str) -> str`
-Get active weather alerts for a US state (two-letter code).
-
-### GNS3 Tools
-
-#### `connect_to_gns3(server_url: str, username: str, password: str) -> str`
-Connect to a GNS3 server with optional authentication.
-
-#### `list_projects(server_url: str) -> str`
-List all available projects on the GNS3 server.
-
-#### `list_templates(server_url: str) -> str`
-List all available templates on the GNS3 server.
-
-#### `create_simple_topology(project_name: str, firewalls: int, workstations: int, ...) -> str`
-Create a complete network topology with firewalls, workstations, and a switch.
-This tool handles the entire workflow: connection, node creation, linking, and starting.
-
-#### `create_vpcs_topology(project_name: str, vpcs_count: int, vpcs_template: str) -> str`
-Create a simple topology with VPCS nodes connected to a switch.
-Specialized tool for creating VPCS-based networks.
-
-#### `create_vpcs_network(project_name: str, vpcs_count: int) -> str`
-Create a VPCS network with the specified number of VPCS nodes connected to a switch.
-Simplified tool specifically designed for VPCS networks.
-
-#### `create_custom_topology(project_name: str, topology_description: str) -> str`
-Create a custom topology based on natural language description.
-
-#### `start_project_nodes(project_name: str) -> str`
-Start all nodes in a project.
-
-#### `stop_project_nodes(project_name: str) -> str`
-Stop all nodes in a project.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Run the test suite
-6. Submit a pull request
+- Policies are plain YAML—edit them manually if you want to fine-tune commands before activation.
+- The resolver is intentionally simple; add custom checks in `intent_pipeline/intent_resolver.py` if needed.
+- Run individual stages by calling the underlying functions in a Python REPL for quicker iteration.
 
 ## License
 
-[Add your license here]
-
-## Acknowledgments
-
-- Model Context Protocol (MCP) specification
-- National Weather Service API
-- OpenAI API
+Add the license text that fits your course or project submission.
