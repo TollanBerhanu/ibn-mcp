@@ -1,0 +1,92 @@
+# demo-topology.yaml
+topology: ans-semester-project
+description: Minimal context for IBN intent profiling (fixed topology)
+
+subnets:
+  - name: west-lan
+    cidr: 192.168.1.0/24
+    default_gw: 192.168.1.100
+  - name: fw-r1-segment
+    cidr: 192.168.0.0/24
+  - name: r1-r2-transit
+    cidr: 172.16.0.0/30
+  - name: east-lan
+    cidr: 10.0.0.0/24
+    default_gw: 10.0.0.1
+
+nodes:
+  - name: R1
+    type: router
+    interfaces:
+      - id: r1-fw
+        ip: 192.168.0.1/24
+        link: firewall:fw-wan
+      - id: r1-r2
+        ip: 172.16.0.1/30
+        link: R2:r2-r1
+
+  - name: firewall
+    type: firewall
+    interfaces:
+      - id: fw-wan
+        ip: 192.168.0.100/24
+        link: R1:r1-fw
+      - id: fw-lan
+        ip: 192.168.1.100/24
+        link: Switch1:sw1-fw
+
+  - name: Switch1
+    type: switch
+    interfaces:
+      - id: sw1-fw
+        link: firewall:fw-lan
+      - id: sw1-w1
+        link: workstation-1:eth0
+      - id: sw1-w2
+        link: workstation-2:eth0
+
+  - name: workstation-1
+    type: host
+    interfaces:
+      - id: eth0
+        ip: 192.168.1.10/24
+        gw: 192.168.1.100
+
+  - name: workstation-2
+    type: host
+    interfaces:
+      - id: eth0
+        ip: 192.168.1.20/24
+        gw: 192.168.1.100
+
+  - name: R2
+    type: router
+    interfaces:
+      - id: r2-r1
+        ip: 172.16.0.2/30
+        link: R1:r1-r2
+      - id: r2-lan
+        ip: 10.0.0.1/24
+        link: Switch2:sw2-r2
+
+  - name: Switch2
+    type: switch
+    interfaces:
+      - id: sw2-r2
+        link: R2:r2-lan
+      - id: sw2-apache
+        link: apache-server:eth0
+
+  - name: apache-server
+    type: server
+    services: [http, https]
+    interfaces:
+      - id: eth0
+        ip: 10.0.0.10/24
+        gw: 10.0.0.1
+
+groups:
+  - name: workstations
+    members: [workstation-1, workstation-2]
+  - name: web-servers
+    members: [apache-server]
