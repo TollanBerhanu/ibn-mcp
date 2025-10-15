@@ -1,0 +1,2339 @@
+policies:
+- policy_id: policy-ans-semester-project-e2w-block-v1
+  intent:
+    raw: Block east LAN from west LAN
+    summary: Prevent hosts in east-lan (10.0.0.0/24) from initiating connections to
+      west-lan (192.168.1.0/24), without disrupting west-to-east traffic.
+    assumptions:
+    - 'Directionality: Only block east-lan initiated sessions toward west-lan; west-lan
+      initiated sessions to east-lan must remain allowed.'
+    - Stateful firewalling is available on device 'firewall' (iptables with conntrack).
+    - Routing between subnets is already functional.
+    - 'Firewall interfaces: eth0 toward R1 (192.168.0.100/24), eth1 toward west-lan
+      (192.168.1.100/24).'
+    - Kernel IP forwarding is enabled or can be enabled on the firewall container.
+  policy_rules:
+  - rule_id: rule-1
+    description: Deny NEW connections from east-lan (10.0.0.0/24) to west-lan (192.168.1.0/24)
+      at the west perimeter firewall.
+    targets:
+    - firewall
+    action: drop
+    constraints:
+    - Only drop NEW sessions; allow ESTABLISHED/RELATED to preserve west->east return
+      traffic.
+    - Do not modify other forwarding policies.
+    - No impact to services hosted in east-lan (e.g., apache-server) being accessed
+      from west-lan.
+  enforcement_steps:
+  - step: 1
+    device: firewall
+    method: telnet
+    commands: &id001
+    - cat /proc/sys/net/ipv4/ip_forward
+    - echo 1 > /proc/sys/net/ipv4/ip_forward
+    notes: Ensure IP forwarding is enabled on the firewall so the FORWARD chain is
+      active for transit traffic.
+  - step: 2
+    device: firewall
+    method: telnet
+    commands: &id002
+    - iptables -I FORWARD 1 -m conntrack --ctstate NEW -s 10.0.0.0/24 -d 192.168.1.0/24
+      -j DROP
+    - iptables -I FORWARD 2 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    - iptables -L FORWARD -n -v --line-numbers
+    notes: Insert targeted DROP for NEW east->west flows at top. Add explicit ACCEPT
+      for ESTABLISHED,RELATED immediately after to avoid impacting return traffic.
+  validation_checks:
+  - check_id: val-1
+    description: Verify east->west ICMP is blocked.
+    type: functional
+    source_device: apache-server
+    commands: &id003
+    - ping -c 3 192.168.1.10
+    - ping -c 3 192.168.1.20
+    success_criteria: ICMP echo requests from 10.0.0.10 to 192.168.1.10 and 192.168.1.20
+      show 100% packet loss (no replies).
+  - check_id: val-2
+    description: Verify west->east reachability remains allowed.
+    type: functional
+    source_device: workstation-1
+    commands: &id004
+    - ping -c 3 10.0.0.10
+    success_criteria: ICMP echo replies received (packet loss 0%) from 10.0.0.10.
+  - check_id: val-3
+    description: Confirm firewall rule hit counters increment on attempted east->west
+      traffic.
+    type: operational
+    source_device: firewall
+    commands: &id005
+    - iptables -L FORWARD -n -v --line-numbers
+    success_criteria: The first FORWARD chain rule (DROP NEW from 10.0.0.0/24 to 192.168.1.0/24)
+      shows packet/byte counters greater than zero after test attempts.
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T03:36:15.669257Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check val-1 did not meet criteria 'ICMP echo requests from 10.0.0.10
+      to 192.168.1.10 and 192.168.1.20 show 100% packet loss (no replies).'
+    - Validation check val-2 did not meet criteria 'ICMP echo replies received (packet
+      loss 0%) from 10.0.0.10.'
+    - Validation check val-3 did not meet criteria 'The first FORWARD chain rule (DROP
+      NEW from 10.0.0.0/24 to 192.168.1.0/24) shows packet/byte counters greater than
+      zero after test attempts.'
+  notes: Policy enforced at the west perimeter ('firewall') to block only NEW connections
+    from east-lan (10.0.0.0/24) to west-lan (192.168.1.0/24). This preserves west->east
+    sessions and their return traffic. If persistence across container restarts is
+    required, save rules with iptables-save according to the container's OS conventions.
+    Alternative stateless enforcement on R1/R2 via ACLs is not recommended because
+    it would also block return traffic for west-initiated sessions.
+  activation_logs:
+  - device: firewall
+    commands: *id001
+    output:
+    - "cat /proc/sys/net/ipv4/ip_forward\r\n\e[?2004l\r1\r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "echo 1 > /proc/sys/net/ipv4/ip_forward\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+  - device: firewall
+    commands: *id002
+    output:
+    - "iptables -I FORWARD 1 -m conntrack --ctstate NEW -s 10.0.0.0/24 \r -d 192.168.1.0/24\
+      \ -j DROP\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e\
+      [K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 2 -m conntrack --ctstate ESTABLISHED,RELATED\rD -j ACCEPT\r\
+      \n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -L FORWARD -n -v --line-numbers\r\n\e[?2004l\rChain FORWARD (policy\
+      \ ACCEPT 0 packets, 0 bytes)\r\nnum   pkts bytes target     prot opt in    \
+      \ out     source               destination         \r\n1        0     0 DROP\
+      \       0    --  *      *       10.0.0.0/24          192.168.1.0/24       ctstate\
+      \ NEW\r\n2        0     0 ACCEPT     0    --  *      *       0.0.0.0/0     \
+      \       0.0.0.0/0            ctstate RELATED,ESTABLISHED\r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+  assurance_results:
+  - check_id: val-1
+    source_device: apache-server
+    commands: *id003
+    output:
+    - "ping -c 3 192.168.1.10\r\n\e[?2004l\rPING 192.168.1.10 (192.168.1.10) 56(84)\
+      \ bytes of data."
+    - ping -c 3 192.168.1.20
+    success: false
+    criteria: ICMP echo requests from 10.0.0.10 to 192.168.1.10 and 192.168.1.20 show
+      100% packet loss (no replies).
+  - check_id: val-2
+    source_device: workstation-1
+    commands: *id004
+    output:
+    - "ping -c 3 10.0.0.10\r\n\e[?2004l\rPING 10.0.0.10 (10.0.0.10) 56(84) bytes of\
+      \ data.\r\n64 bytes from 10.0.0.10: icmp_seq=1 ttl=61 time=39.6 ms"
+    success: false
+    criteria: ICMP echo replies received (packet loss 0%) from 10.0.0.10.
+  - check_id: val-3
+    source_device: firewall
+    commands: *id005
+    output:
+    - "iptables -L FORWARD -n -v --line-numbers\r\n\e[?2004l\rChain FORWARD (policy\
+      \ ACCEPT 1 packets, 84 bytes)\r\nnum   pkts bytes target     prot opt in   \
+      \  out     source               destination         \r\n1        3   252 DROP\
+      \       0    --  *      *       10.0.0.0/24          192.168.1.0/24       ctstate\
+      \ NEW\r\n2        2   168 ACCEPT     0    --  *      *       0.0.0.0/0     \
+      \       0.0.0.0/0            ctstate RELATED,ESTABLISHED\r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: The first FORWARD chain rule (DROP NEW from 10.0.0.0/24 to 192.168.1.0/24)
+      shows packet/byte counters greater than zero after test attempts.
+- policy_id: pol-ans-icmp-ew-block-001
+  intent:
+    raw: Block ICMP packets from east LAN to west LAN
+    summary: Deny all IPv4 ICMP traffic originating from east-lan (10.0.0.0/24) to
+      west-lan (192.168.1.0/24).
+    assumptions:
+    - east-lan is 10.0.0.0/24 behind R2 (interface r2-lan 10.0.0.1/24) and west-lan
+      is 192.168.1.0/24 behind firewall eth1 (192.168.1.100/24).
+    - Traffic from east-lan to west-lan traverses the firewall (R2 -> R1 -> firewall
+      -> Switch1).
+    - IPv4 scope only; no IPv6 enforcement required.
+    - Only east-to-west ICMP should be blocked; west-to-east ICMP is not in scope
+      and should remain unaffected if currently permitted by existing policies.
+    - No NAT is configured on the firewall paths that would alter the original 10.0.0.0/24
+      source or 192.168.1.0/24 destination addresses.
+  policy_rules:
+  - rule_id: rule-1
+    description: Drop all forwarded IPv4 ICMP packets where source is east-lan (10.0.0.0/24)
+      and destination is west-lan (192.168.1.0/24).
+    targets:
+    - firewall
+    action: drop
+    constraints:
+    - Apply in the firewall FORWARD chain so inter-interface transit is affected (not
+      INPUT/OUTPUT).
+    - Match protocol icmp, src 10.0.0.0/24, dst 192.168.1.0/24.
+    - Do not affect non-ICMP traffic or ICMP in the west-to-east direction.
+    - Ensure rule order places this drop before any broad ACCEPT rules.
+  enforcement_steps:
+  - step: 1
+    device: firewall
+    method: telnet
+    commands: &id006
+    - iptables -C FORWARD -s 10.0.0.0/24 -d 192.168.1.0/24 -p icmp -m comment --comment
+      "pol-ans-icmp-ew-block-001:rule-1" -j DROP || iptables -I FORWARD 1 -s 10.0.0.0/24
+      -d 192.168.1.0/24 -p icmp -m comment --comment "pol-ans-icmp-ew-block-001:rule-1"
+      -j DROP
+    - iptables -S FORWARD
+    notes: The rule is inserted at the top of FORWARD to take precedence. Comment
+      added for traceability. Persistence across container restarts is not guaranteed
+      unless iptables-save is integrated with a persistent mechanism.
+  validation_checks:
+  - check_id: vc-1
+    description: Verify the DROP rule exists in the firewall FORWARD chain.
+    type: cli
+    source_device: firewall
+    commands: &id007
+    - iptables -S FORWARD | grep -n "pol-ans-icmp-ew-block-001:rule-1"
+    success_criteria: Output contains a DROP rule in FORWARD with -p icmp -s 10.0.0.0/24
+      -d 192.168.1.0/24 and the comment pol-ans-icmp-ew-block-001:rule-1.
+  - check_id: vc-2
+    description: ICMP from east to west-lan host workstation-1 is blocked.
+    type: ping
+    source_device: apache-server
+    commands: &id008
+    - ping -c 3 192.168.1.10
+    success_criteria: Ping fails with 100% packet loss (no ICMP echo replies received).
+  - check_id: vc-3
+    description: ICMP from east to west-lan host workstation-2 is blocked.
+    type: ping
+    source_device: apache-server
+    commands: &id009
+    - ping -c 3 192.168.1.20
+    success_criteria: Ping fails with 100% packet loss (no ICMP echo replies received).
+  - check_id: vc-4
+    description: 'Optional non-regression: ICMP west-to-east remains unaffected (if
+      previously permitted).'
+    type: ping
+    source_device: workstation-1
+    commands: &id010
+    - ping -c 3 10.0.0.10
+    success_criteria: At least one ICMP echo reply is received (packet loss < 100%).
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T04:41:03.356515Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check vc-1 did not meet criteria 'Output contains a DROP rule in
+      FORWARD with -p icmp -s 10.0.0.0/24 -d 192.168.1.0/24 and the comment pol-ans-icmp-ew-block-001:rule-1.'
+    - Validation check vc-2 did not meet criteria 'Ping fails with 100% packet loss
+      (no ICMP echo replies received).'
+    - Validation check vc-3 did not meet criteria 'Ping fails with 100% packet loss
+      (no ICMP echo replies received).'
+    - Validation check vc-4 did not meet criteria 'At least one ICMP echo reply is
+      received (packet loss < 100%).'
+  notes: Enforcement uses iptables on the firewall to drop ICMP in the east->west
+    direction only. If persistent rules are required, integrate iptables-save with
+    a persistence mechanism (e.g., iptables-persistent) in the firewall container.
+    This policy does not modify R1/R2; it relies on the firewall being in the transit
+    path between 10.0.0.0/24 and 192.168.1.0/24.
+  activation_logs:
+  - device: firewall
+    commands: *id006
+    output:
+    - "iptables -C FORWARD -s 10.0.0.0/24 -d 192.168.1.0/24 -p icmp -m \r comment\
+      \ --comment \"pol-ans-icmp-ew-block-001:rule-1\" -j DROP || iptables -I FORW\r\
+      WARD 1 -s 10.0.0.0/24 -d 192.168.1.0/24 -p icmp -m comment --comment \"pol-ans-icm\r\
+      mp-ew-block-001:rule-1\" -j DROP\r\n\e[?2004l\riptables: Bad rule (does a matching\
+      \ rule exist in that chain?).\r\n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -S FORWARD\r\n\e[?2004l\r-P FORWARD ACCEPT\r\n-A FORWARD -s 10.0.0.0/24\
+      \ -d 192.168.1.0/24 -p icmp -m comment --comment \"pol-ans-icmp-ew-block-001:rule-1\"\
+      \ -j DROP\r\n-A FORWARD -s 10.0.0.0/24 -d 192.168.1.0/24 -m conntrack --ctstate\
+      \ NEW -j DROP\r\n-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\r\
+      \n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+  assurance_results:
+  - check_id: vc-1
+    source_device: firewall
+    commands: *id007
+    output:
+    - "iptables -S FORWARD | grep -n \"pol-ans-icmp-ew-block-001:rule-1\"\r\"\r\n\e\
+      [?2004l\r\e[32m\e[K2\e[m\e[K\e[36m\e[K:\e[m\e[K-A FORWARD -s 10.0.0.0/24 -d\
+      \ 192.168.1.0/24 -p icmp -m comment --comment \"\e[01;31m\e[Kpol-ans-icmp-ew-block-001:rule-1\e\
+      [m\e[K\" -j DROP\r\n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\
+      \e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: Output contains a DROP rule in FORWARD with -p icmp -s 10.0.0.0/24 -d
+      192.168.1.0/24 and the comment pol-ans-icmp-ew-block-001:rule-1.
+  - check_id: vc-2
+    source_device: apache-server
+    commands: *id008
+    output:
+    - "ping -c 3 192.168.1.10\r\n\e[?2004l\rPING 192.168.1.10 (192.168.1.10) 56(84)\
+      \ bytes of data."
+    success: false
+    criteria: Ping fails with 100% packet loss (no ICMP echo replies received).
+  - check_id: vc-3
+    source_device: apache-server
+    commands: *id009
+    output:
+    - ping -c 3 192.168.1.20
+    success: false
+    criteria: Ping fails with 100% packet loss (no ICMP echo replies received).
+  - check_id: vc-4
+    source_device: workstation-1
+    commands: *id010
+    output:
+    - "ping -c 3 10.0.0.10\r\n\e[?2004l\rPING 10.0.0.10 (10.0.0.10) 56(84) bytes of\
+      \ data."
+    success: false
+    criteria: At least one ICMP echo reply is received (packet loss < 100%).
+- policy_id: pol-ans-icmp-block-east-to-west-001
+  intent:
+    raw: Block ICMP packets from east LAN to west LAN
+    summary: Drop all ICMP traffic originating from 10.0.0.0/24 (east LAN) destined
+      to 192.168.1.0/24 (west LAN).
+    assumptions:
+    - East LAN refers to subnet 10.0.0.0/24 behind R2.
+    - West LAN refers to subnet 192.168.1.0/24 behind the firewall (default gateway
+      192.168.1.100).
+    - Blocking is only in the east-to-west direction; west-to-east traffic is unaffected.
+    - Firewall should enforce the block at its forwarding boundary between eth0 (192.168.0.0/24
+      toward R1) and eth1 (192.168.1.0/24 toward Switch1).
+    - "Traffic destined to the firewall\u2019s own LAN IP (192.168.1.100) is not considered\
+      \ west LAN host traffic and is out of scope unless otherwise specified."
+  policy_rules:
+  - rule_id: rule-icmp-e2w-drop
+    description: "Drop all ICMP from east LAN (10.0.0.0/24) to west LAN (192.168.1.0/24)\
+      \ at the firewall\u2019s FORWARD chain."
+    targets:
+    - firewall
+    action: deny
+    constraints:
+    - Match protocol ICMP, any type.
+    - Match src subnet 10.0.0.0/24 and dst subnet 192.168.1.0/24.
+    - Apply only on forwarding path eth0 -> eth1.
+    - Do not affect other protocols or west-to-east direction.
+  enforcement_steps:
+  - step: 1
+    device: firewall
+    method: telnet
+    commands: &id011
+    - iptables -S FORWARD
+    - iptables -I FORWARD 1 -i eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.1.0/24 -p icmp
+      -j DROP
+    - iptables -S FORWARD
+    - iptables -L FORWARD -v -n
+    notes: eth0 (192.168.0.100/24) is toward R1; eth1 (192.168.1.100/24) is toward
+      Switch1/west LAN. The drop rule is inserted at the top of FORWARD to preempt
+      any generic ACCEPT rules. Persistence may require saving rules in the container
+      environment, e.g., `mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4`
+      if supported.
+  validation_checks:
+  - check_id: val-icmp-block-apache-to-w1
+    description: ICMP from east LAN host to west LAN host should be blocked.
+    type: functional
+    source_device: apache-server
+    commands: &id012
+    - ping -c 3 192.168.1.10
+    - ping -c 3 192.168.1.20
+    success_criteria: Both pings return 0/3 received (100% packet loss) to 192.168.1.10
+      and 192.168.1.20.
+  - check_id: val-icmp-allow-west-to-east
+    description: ICMP from west LAN to east LAN remains allowed (policy is directional).
+    type: functional
+    source_device: workstation-1
+    commands: &id013
+    - ping -c 3 10.0.0.10
+    success_criteria: Ping from 192.168.1.10 to 10.0.0.10 receives replies (at least
+      1/3 packets received).
+  - check_id: val-counters-firewall
+    description: Firewall FORWARD chain shows drops for ICMP from 10.0.0.0/24 to 192.168.1.0/24.
+    type: telemetry
+    source_device: firewall
+    commands: &id014
+    - iptables -L FORWARD -v -n | grep -i icmp
+    success_criteria: The FORWARD chain displays a rule matching ICMP with non-zero
+      packet/byte counters for src 10.0.0.0/24 to dst 192.168.1.0/24 and target DROP.
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T05:17:46.111490Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check val-icmp-block-apache-to-w1 did not meet criteria 'Both pings
+      return 0/3 received (100% packet loss) to 192.168.1.10 and 192.168.1.20.'
+    - Validation check val-icmp-allow-west-to-east did not meet criteria 'Ping from
+      192.168.1.10 to 10.0.0.10 receives replies (at least 1/3 packets received).'
+    - Validation check val-counters-firewall did not meet criteria 'The FORWARD chain
+      displays a rule matching ICMP with non-zero packet/byte counters for src 10.0.0.0/24
+      to dst 192.168.1.0/24 and target DROP.'
+  notes: "This policy is implemented on the firewall to enforce the boundary between\
+    \ east and west LANs. No changes are required on R1, R2, or switches. If the intent\
+    \ should also block ICMP to the firewall\u2019s own west-side IP (192.168.1.100),\
+    \ add an INPUT chain rule on the firewall for -d 192.168.1.100 -p icmp -j DROP\
+    \ on eth0."
+  activation_logs:
+  - device: firewall
+    commands: *id011
+    output:
+    - "iptables -S FORWARD\r\n\e[?2004l\r-P FORWARD ACCEPT\r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 1 -i eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.\r.1.0/24 -p\
+      \ icmp -j DROP\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -S FORWARD\r\n\e[?2004l\r-P FORWARD ACCEPT\r\n-A FORWARD -s 10.0.0.0/24\
+      \ -d 192.168.1.0/24 -i eth0 -o eth1 -p icmp -j DROP\r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -L FORWARD -v -n\r\n\e[?2004l\rChain FORWARD (policy ACCEPT 0 packets,\
+      \ 0 bytes)\r\n pkts bytes target     prot opt in     out     source        \
+      \       destination         \r\n    0     0 DROP       1    --  eth0   eth1\
+      \    10.0.0.0/24          192.168.1.0/24      \r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+  assurance_results:
+  - check_id: val-icmp-block-apache-to-w1
+    source_device: apache-server
+    commands: *id012
+    output:
+    - "ping -c 3 192.168.1.10\r\n\e[?2004l\rPING 192.168.1.10 (192.168.1.10) 56(84)\
+      \ bytes of data."
+    - ping -c 3 192.168.1.20
+    success: false
+    criteria: Both pings return 0/3 received (100% packet loss) to 192.168.1.10 and
+      192.168.1.20.
+  - check_id: val-icmp-allow-west-to-east
+    source_device: workstation-1
+    commands: *id013
+    output:
+    - "ping -c 3 10.0.0.10\r\n\e[?2004l\rPING 10.0.0.10 (10.0.0.10) 56(84) bytes of\
+      \ data."
+    success: false
+    criteria: Ping from 192.168.1.10 to 10.0.0.10 receives replies (at least 1/3 packets
+      received).
+  - check_id: val-counters-firewall
+    source_device: firewall
+    commands: *id014
+    output:
+    - "iptables -L FORWARD -v -n | grep -i icmp\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: The FORWARD chain displays a rule matching ICMP with non-zero packet/byte
+      counters for src 10.0.0.0/24 to dst 192.168.1.0/24 and target DROP.
+- policy_id: ans-ibn-tls13-web-0001
+  intent:
+    raw: Enable TLS 1.3 in the apache server so that all communivations from the east
+      Lan to the webserver in the west LAN is encrypted
+    summary: Enforce TLS 1.3-only HTTPS for client access from west-lan (192.168.1.0/24)
+      to the apache-server and block unencrypted HTTP.
+    assumptions:
+    - The intended webserver is the node named 'apache-server' at 10.0.0.10/24 (east-lan),
+      and clients are in west-lan (192.168.1.0/24).
+    - A self-signed certificate is acceptable for encryption (trust is not required
+      by the intent).
+    - The apache-server image has or can install Apache HTTPD, OpenSSL 1.1.1+ and
+      supports TLS 1.3.
+    - The firewall (iptables container) is the policy enforcement point between west-lan
+      and the rest of the network.
+    - No NAT or additional routing changes are required beyond current topology.
+  policy_rules:
+  - rule_id: rule-1
+    description: Enable and enforce TLS 1.3-only on apache-server with a valid certificate
+      and HTTPS on TCP/443.
+    targets:
+    - apache-server
+    action: configure
+    constraints:
+    - 'TLS protocol: TLSv1.3 only (disable TLSv1.2 and below).'
+    - 'Ciphers: TLS 1.3 default cipher suites only.'
+    - Listen on TCP/443 and serve from /var/www/html.
+    - Use self-signed cert stored under /etc/ssl/localcerts/.
+  - rule_id: rule-2
+    description: Force HTTP-to-HTTPS redirection on apache-server for any direct port
+      80 access.
+    targets:
+    - apache-server
+    action: configure
+    constraints:
+    - Enable RewriteEngine to redirect cleartext HTTP to HTTPS with 301.
+    - HSTS enabled with max-age 1 year for HTTPS responses.
+  - rule_id: rule-3
+    description: Allow only TCP/443 from west-lan (192.168.1.0/24) to apache-server
+      (10.0.0.10) and block TCP/80 at the firewall.
+    targets:
+    - firewall
+    action: filter
+    constraints:
+    - 'FORWARD chain: allow stateful TCP/443 west-lan -> 10.0.0.10 and return traffic.'
+    - 'FORWARD chain: reject TCP/80 west-lan -> 10.0.0.10 with tcp-reset.'
+    - Do not modify unrelated traffic.
+  enforcement_steps:
+  - step: 1
+    device: apache-server
+    method: telnet
+    commands: &id015
+    - apt-get update
+    - apt-get install -y apache2 openssl ca-certificates
+    - a2enmod ssl headers rewrite
+    - mkdir -p /etc/ssl/localcerts
+    - openssl req -x509 -nodes -newkey rsa:4096 -days 365 -keyout /etc/ssl/localcerts/apache-selfsigned.key
+      -out /etc/ssl/localcerts/apache-selfsigned.crt -subj "/C=US/ST=NA/L=Lab/O=ANS/OU=IT/CN=10.0.0.10"
+    - chmod 600 /etc/ssl/localcerts/apache-selfsigned.key
+    - grep -q "^Listen 443" /etc/apache2/ports.conf || echo "Listen 443" >> /etc/apache2/ports.conf
+    - "cat > /etc/apache2/sites-available/tls13.conf << 'EOF'\n<VirtualHost *:443>\n\
+      \    ServerName 10.0.0.10\n    SSLEngine on\n    SSLCertificateFile /etc/ssl/localcerts/apache-selfsigned.crt\n\
+      \    SSLCertificateKeyFile /etc/ssl/localcerts/apache-selfsigned.key\n    SSLProtocol\
+      \ -all +TLSv1.3\n    SSLCipherSuite TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256\n\
+      \    SSLHonorCipherOrder off\n    Header always set Strict-Transport-Security\
+      \ \"max-age=31536000; includeSubDomains\"\n    DocumentRoot /var/www/html\n\
+      \    <Directory /var/www/html>\n        Require all granted\n    </Directory>\n\
+      \    ErrorLog ${APACHE_LOG_DIR}/tls13_error.log\n    CustomLog ${APACHE_LOG_DIR}/tls13_access.log\
+      \ combined\n</VirtualHost>\nEOF"
+    - "cat > /etc/apache2/sites-available/redirect-http-to-https.conf << 'EOF'\n<VirtualHost\
+      \ *:80>\n    ServerName 10.0.0.10\n    RewriteEngine On\n    RewriteCond %{HTTPS}\
+      \ !=on\n    RewriteRule ^/(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]\n</VirtualHost>\n\
+      EOF"
+    - a2ensite tls13
+    - a2ensite redirect-http-to-https
+    - apachectl configtest
+    - apachectl -k graceful
+    notes: Installs/validates Apache with TLS 1.3-only vhost on 443 and an HTTP->HTTPS
+      redirect vhost on 80. HSTS enabled. Self-signed certificate used for encryption.
+  - step: 2
+    device: firewall
+    method: telnet
+    commands: &id016
+    - iptables -A FORWARD -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 443 -m state
+      --state NEW,ESTABLISHED -j ACCEPT
+    - iptables -A FORWARD -s 10.0.0.10 -d 192.168.1.0/24 -p tcp --sport 443 -m state
+      --state ESTABLISHED -j ACCEPT
+    - iptables -A FORWARD -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 80 -j REJECT
+      --reject-with tcp-reset
+    - iptables-save > /etc/iptables.rules
+    notes: Allows HTTPS (443/tcp) statefully between west-lan (192.168.1.0/24) and
+      apache-server (10.0.0.10) and rejects HTTP (80/tcp) from west-lan to the server.
+  validation_checks:
+  - check_id: val-1
+    description: Verify Apache is serving TLS 1.3 on port 443
+    type: command
+    source_device: apache-server
+    commands: &id017
+    - apachectl -M | grep -i ssl || true
+    - grep -R "SSLProtocol" /etc/apache2/sites-enabled/ /etc/apache2/sites-available/
+      | grep -i "+TLSv1.3"
+    - ss -ltnp | grep ":443" || netstat -ltnp | grep ":443" || true
+    - openssl version
+    success_criteria: ssl_module is loaded, SSLProtocol shows -all +TLSv1.3, Apache
+      listening on :443, and OpenSSL is 1.1.1+.
+  - check_id: val-2
+    description: From west-lan clients, HTTPS succeeds and negotiates TLSv1.3
+    type: transaction
+    source_device: workstation-1
+    commands: &id018
+    - openssl s_client -connect 10.0.0.10:443 -tls1_3 -servername 10.0.0.10 </dev/null
+      2>/dev/null | grep -E "^Protocol|^Cipher"
+    - curl -k -s -o /dev/null -w "%{http_code} TLS:%{ssl_version}\n" https://10.0.0.10/
+    success_criteria: 'openssl reports Protocol: TLSv1.3 and a valid Cipher; curl
+      over HTTPS returns 200 OK (or 301/200) with TLS:TLSv1.3.'
+  - check_id: val-3
+    description: From west-lan clients, HTTP to port 80 is blocked by firewall
+    type: transaction
+    source_device: workstation-2
+    commands: &id019
+    - curl -s -m 3 -o /dev/null -w "%{http_code}\n" http://10.0.0.10/ || echo "HTTP
+      connection failed as expected"
+    - sh -c 'nc -zv -w3 10.0.0.10 80 || echo "Port 80 blocked as expected"'
+    success_criteria: HTTP connection fails (no 200 OK), and TCP port 80 cannot be
+      established.
+  - check_id: val-4
+    description: Firewall has the intended FORWARD chain rules in effect
+    type: command
+    source_device: firewall
+    commands: &id020
+    - iptables -L FORWARD -n -v --line-numbers
+    - iptables -S FORWARD
+    success_criteria: Rules present that ACCEPT tcp/443 from 192.168.1.0/24 to 10.0.0.10
+      (and ESTABLISHED return) and REJECT tcp/80 from 192.168.1.0/24 to 10.0.0.10.
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T05:22:32.146336Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check val-1 did not meet criteria 'ssl_module is loaded, SSLProtocol
+      shows -all +TLSv1.3, Apache listening on :443, and OpenSSL is 1.1.1+.'
+    - 'Validation check val-2 did not meet criteria ''openssl reports Protocol: TLSv1.3
+      and a valid Cipher; curl over HTTPS returns 200 OK (or 301/200) with TLS:TLSv1.3.'''
+    - Validation check val-3 did not meet criteria 'HTTP connection fails (no 200
+      OK), and TCP port 80 cannot be established.'
+    - Validation check val-4 did not meet criteria 'Rules present that ACCEPT tcp/443
+      from 192.168.1.0/24 to 10.0.0.10 (and ESTABLISHED return) and REJECT tcp/80
+      from 192.168.1.0/24 to 10.0.0.10.'
+  notes: This policy enforces encryption in transit from west-lan clients to the apache-server
+    by enabling TLS 1.3-only HTTPS on the server and filtering traffic at the firewall
+    to allow TCP/443 while blocking TCP/80. The natural-language intent mentioned
+    a 'webserver in the west LAN'; the topology shows the apache-server resides in
+    east-lan (10.0.0.10). The assumptions clarify this and scope enforcement and validation
+    accordingly.
+  activation_logs:
+  - device: apache-server
+    commands: *id015
+    output:
+    - "apt-get update\r\n\e[?2004l\r\r0% [Working]\r            \rIgn:1 http://deb.debian.org/debian\
+      \ bookworm InRelease\r\n\r0% [Working]\r            \rIgn:2 http://deb.debian.org/debian\
+      \ bookworm-updates InRelease\r\n\r0% [Connecting to deb.debian.org]\r      \
+      \                           \rIgn:3 http://deb.debian.org/debian-security bookworm-security\
+      \ InRelease\r\n\r                                 \r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r            \rIgn:1 http://deb.debian.org/debian\
+      \ bookworm InRelease\r\n\r0% [Working]\r            \rIgn:2 http://deb.debian.org/debian\
+      \ bookworm-updates InRelease\r\n\r0% [Connecting to deb.debian.org]\r      \
+      \                           \rIgn:3 http://deb.debian.org/debian-security bookworm-security\
+      \ InRelease\r\n\r                                 \r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r            \rIgn:1\
+      \ http://deb.debian.org/debian bookworm InRelease\r\n\r0% [Working]\r      \
+      \      \rIgn:2 http://deb.debian.org/debian bookworm-updates InRelease\r\n\r\
+      0% [Connecting to deb.debian.org]\r                                 \rIgn:3\
+      \ http://deb.debian.org/debian-security bookworm-security InRelease\r\n\r  \
+      \                               \r0% [Working]\r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r\
+      0% [Working]\r            \rErr:1 http://deb.debian.org/debian bookworm InRelease\r\
+      \n  Temporary failure resolving 'deb.debian.org'\r\n\r0% [Working]\r       \
+      \     \rErr:2 http://deb.debian.org/debian bookworm-updates InRelease\r\n  Temporary\
+      \ failure resolving 'deb.debian.org'\r\n\r0% [Connecting to deb.debian.org]\r\
+      \                                 \rErr:3 http://deb.debian.org/debian-security\
+      \ bookworm-security InRelease\r\n  Temporary failure resolving 'deb.debian.org'\r\
+      \n\r                                 \r0% [Working]\r            \r\rReading\
+      \ package lists... 0%\r\rReading package lists... 0%\r\rReading package lists...\
+      \ 65%\r\rReading package lists... Done\r\r\nW: Failed to fetch http://deb.debian.org/debian/dists/bookworm/InRelease\
+      \  Temporary failure resolving 'deb.debian.org'\r\nW: Failed to fetch http://deb.debian.org/debian/dists/bookworm-updates/InRelease\
+      \  Temporary failure resolving 'deb.debian.org'\r\nW: Failed to fetch http://deb.debian.org/debian-security/dists/bookworm-security/InRelease\
+      \  Temporary failure resolving 'deb.debian.org'\r\nW: Some index files failed\
+      \ to download. They have been ignored, or old ones used instead.\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "apt-get install -y apache2 openssl ca-certificates\r\n\e[?2004l\r\rReading\
+      \ package lists... 0%\r\rReading package lists... 0%\r\rReading package lists...\
+      \ 65%\r\rReading package lists... Done\r\r\n\rBuilding dependency tree... 0%\r\
+      \rBuilding dependency tree... 0%\r\rBuilding dependency tree... 50%\r\rBuilding\
+      \ dependency tree... 50%\r\rBuilding dependency tree... Done\r\r\n\rReading\
+      \ state information... 0% \r\rReading state information... 0%\r\rReading state\
+      \ information... Done\r\r\napache2 is already the newest version (2.4.65-1~deb12u1).\r\
+      \nopenssl is already the newest version (3.0.17-1~deb12u3).\r\nca-certificates\
+      \ is already the newest version (20230311+deb12u1).\r\n0 upgraded, 0 newly installed,\
+      \ 0 to remove and 0 not upgraded.\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/#"
+    - "a2enmod ssl headers rewrite\r\n\e[?2004l\rConsidering dependency setenvif for\
+      \ ssl:\r\nModule setenvif already enabled\r\nConsidering dependency mime for\
+      \ ssl:\r\nModule mime already enabled\r\nConsidering dependency socache_shmcb\
+      \ for ssl:\r\nEnabling module socache_shmcb.\r\nEnabling module ssl.\r\nSee\
+      \ /usr/share/doc/apache2/README.Debian.gz on how to configure SSL and create\
+      \ self-signed certificates.\r\nEnabling module headers.\r\nEnabling module rewrite.\r\
+      \nTo activate the new configuration, you need to run:\r\n  service apache2 restart\r\
+      \n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "mkdir -p /etc/ssl/localcerts\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\
+      \n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "openssl req -x509 -nodes -newkey rsa:4096 -days 365 -keyout\rt /etc/ssl/localcerts/apache-selfsigned.key\
+      \ -out /etc/ssl/localcerts/apache-selfs\rsigned.crt -subj \"/C=US/ST=NA/L=Lab/O=ANS/OU=IT/CN=10.0.0.10\"\
+      \r\n\e[?2004l\r.....+..+.+......+.....+.+...............+..............+.........+....+..+.+...+..+.............+......+...+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*..+.......+..+...+...+.......+..............+.+...+.....+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*.......+.+...+.........+........+.........+....+..+.............+..+....+.....+..................+.......+...........+....+.......................+...+....+.....+......+............+......+....+..+..........+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\r\
+      \n....+.+..+............+.+.........+...+.....+....+.....+.+...............+........+.+...+.....+...+...+............+.............+..............+.......+...+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*........+.....+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*.+.+............+..+...+...............+...+.......+..+.+......+...+..+......+..........+..+.......+........................+.........+...+............+..+...............+.+.....+.............+......+...+.....+.+.....+.+...+.................+.+..+...+...+......+...+................+............+.........+.....+......+..........+..+......+.......+...+............+...+......+.....+......+..........+............+......+.........+....................+................+.....+..........+......+...+..+..........+.....+.........+..........+...............+......+...............+......+.........+...........+....+......+..+...+...........................+.+..+.......+........+....+...+......+..............+.+...........+.........+.......+..............+.............+...+.....+...............+...+.......+...+......+...+...........+.+......+...+..+...+....+.....................+..+.........+.+..............+...+.+.....+....+...........................+..................+..+.........+.+......+.....+.........+.+....................+..........+...+..+.........+.+.........+.........+..+...+......+..........+...+..+.........+...................+.....+.+..............+......+.+...+.....+......+.+...........+...+.+......+..+...+.........+.+........+......+.............+...............+.....+..........+...+.................+..........+...+.....+.............+.........+..+...+.+..+.........+.........+.+...+...+........+....+......+......+......+...+............+.....+.......+...+..............+.+..+.+..+............+.+....................+.+.....+...+............+...+..........+..+.+..+...+...............+...+......+...+.+.........+..+......+...+.+.......................................+...........+.+.....+..................+............+.........+....+.........+............+.........+.....+.+..............+......+.............+...+........................+.....+.........+.......+..+.+.....................+.....+...+.+...........+..........+..............+.......+.........+...+........+....+......+.....+.........+...+.+..........................+...+.................................+.............+..............+...+....+.....+.+....................+...+.+...+...+........+....+..+.+.....+...+....+.....+..........+.....+.+.....+.+........+.+.....+..........+............+...+.....+.+........+..........+...+.................+...+....+...............+......+...+......+.........+............+..+.+..+..................+....+.....................+..+............+.+..+...+....+......+..+...+.+...+.....+......+................+...........+.............+.....+............+....+...........+............+.+...........+...+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\r\
+      \n-----\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "chmod 600 /etc/ssl/localcerts/apache-selfsigned.key\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "grep -q \"^Listen 443\" /etc/apache2/ports.conf || echo \"List\rten 443\" >>\
+      \ /etc/apache2/ports.conf\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\e\
+      [?2004l\r\e[?2004hroot@apache-server:/#"
+    - "cat > /etc/apache2/sites-available/tls13.conf << 'EOF'\r\n\e[?2004l\r\e[?2004h>\
+      \ <VirtualHost *:443>\r\n\e[?2004l\r\e[?2004h>     ServerName 10.0.0.10\r\n\e\
+      [?2004l\r\e[?2004h>     SSLEngine on\r\n\e[?2004l\r\e[?2004h>     SSLCertificateFile\
+      \ /etc/ssl/localcerts/apache-selfsigned.crt\r\n\e[?2004l\r\e[?2004h>     SSLCertificateKeyFile\
+      \ /etc/ssl/localcerts/apache-selfsigned.key\r\n\e[?2004l\r\e[?2004h>     SSLProtocol\
+      \ -all +TLSv1.3\r\n\e[?2004l\r\e[?2004h>     SSLCipherSuite TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_P\r\
+      POLY1305_SHA256\r\n\e[?2004l\r\e[?2004h>     SSLHonorCipherOrder off\r\n\e[?2004l\r\
+      \e[?2004h>     Header always set Strict-Transport-Security \"max-age=31536000;\
+      \ includeSubDo\romains\"\r\n\e[?2004l\r\e[?2004h>     DocumentRoot /var/www/html\r\
+      \n\e[?2004l\r\e[?2004h>     <Directory /var/www/html>\r\n\e[?2004l\r\e[?2004h>\
+      \         Require all granted\r\n\e[?2004l\r\e[?2004h>     </Directory>\r\n\e\
+      [?2004l\r\e[?2004h>     ErrorLog ${APACHE_LOG_DIR}/tls13_error.log\r\n\e[?2004l\r\
+      \e[?2004h>     CustomLog ${APACHE_LOG_DIR}/tls13_access.log combined\r\n\e[?2004l\r\
+      \e[?2004h> </VirtualHost>\r\n\e[?2004l\r\e[?2004h> EOF\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "cat > /etc/apache2/sites-available/redirect-http-to-https.c\rconf << 'EOF'\r\
+      \n\e[?2004l\r\e[?2004h> <VirtualHost *:80>\r\n\e[?2004l\r\e[?2004h>     ServerName\
+      \ 10.0.0.10\r\n\e[?2004l\r\e[?2004h>     RewriteEngine On\r\n\e[?2004l\r\e[?2004h>\
+      \     RewriteCond %{HTTPS} !=on\r\n\e[?2004l\r\e[?2004h>     RewriteRule ^/(.*)$\
+      \ https://%{HTTP_HOST}/$1 [R=301,L]\r\n\e[?2004l\r\e[?2004h> </VirtualHost>\r\
+      \n\e[?2004l\r\e[?2004h> EOF\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\
+      \e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2ensite tls13\r\n\e[?2004l\rEnabling site tls13.\r\nTo activate the new configuration,\
+      \ you need to run:\r\n  service apache2 reload\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2ensite redirect-http-to-https\r\n\e[?2004l\rEnabling site redirect-http-to-https.\r\
+      \nTo activate the new configuration, you need to run:\r\n  service apache2 reload\r\
+      \n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "apachectl configtest\r\n\e[?2004l\rAH00526: Syntax error on line 14 of /etc/apache2/ports.conf:\r\
+      \nCannot define multiple Listeners on the same IP:port\r\nAction 'configtest'\
+      \ failed.\r\nThe Apache error log may have more information.\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "apachectl -k graceful\r\n\e[?2004l\rAH00526: Syntax error on line 14 of /etc/apache2/ports.conf:\r\
+      \nCannot define multiple Listeners on the same IP:port\r\nAction '-k graceful'\
+      \ failed.\r\nThe Apache error log may have more information.\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+  - device: firewall
+    commands: *id016
+    output:
+    - "iptables -A FORWARD -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dpor\rrt 443 -m\
+      \ state --state NEW,ESTABLISHED -j ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A FORWARD -s 10.0.0.10 -d 192.168.1.0/24 -p tcp --spor\rrt 443 -m\
+      \ state --state ESTABLISHED -j ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A FORWARD -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dpor\rrt 80 -j\
+      \ REJECT --reject-with tcp-reset\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables-save > /etc/iptables.rules\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+  assurance_results:
+  - check_id: val-1
+    source_device: apache-server
+    commands: *id017
+    output:
+    - "apachectl -M | grep -i ssl || true\r\n\e[?2004l\rAH00526: Syntax error on line\
+      \ 14 of /etc/apache2/ports.conf:\r\nCannot define multiple Listeners on the\
+      \ same IP:port\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "grep -R \"SSLProtocol\" /etc/apache2/sites-enabled/ /etc/apac\rche2/sites-available/\
+      \ | grep -i \"+TLSv1.3\"\r\n\e[?2004l\r/etc/apache2/sites-enabled/tls13.conf:\
+      \    SSLProtocol -all +TLSv1.3\r\n/etc/apache2/sites-available/tls13.conf: \
+      \   SSLProtocol -all +TLSv1.3\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/#"
+    - "ss -ltnp | grep \":443\" || netstat -ltnp | grep \":443\" || tr\rrue\r\n\e\
+      [?2004l\r\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "openssl version\r\n\e[?2004l\rOpenSSL 3.0.17 1 Jul 2025 (Library: OpenSSL 3.0.17\
+      \ 1 Jul 2025)\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    success: false
+    criteria: ssl_module is loaded, SSLProtocol shows -all +TLSv1.3, Apache listening
+      on :443, and OpenSSL is 1.1.1+.
+  - check_id: val-2
+    source_device: workstation-1
+    commands: *id018
+    output:
+    - "openssl s_client -connect 10.0.0.10:443 -tls1_3 -servername\re 10.0.0.10 </dev/null\
+      \ 2>/dev/null | grep -E \"^Protocol|^Cipher\"\r\n\e[?2004l\r\e[?2004h\e]0;root@workstation-1:\
+      \ /\aroot@workstation-1:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@workstation-1:\
+      \ /\aroot@workstation-1:/#"
+    - "curl -k -s -o /dev/null -w \"%{http_code} TLS:%{ssl_version}\r}\\n\" https://10.0.0.10/\r\
+      \n\e[?2004l\rcurl: unknown --write-out variable: 'ssl_version'\r\n000 TLS:\r\
+      \n\e[?2004h\e]0;root@workstation-1: /\aroot@workstation-1:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@workstation-1: /\aroot@workstation-1:/#"
+    success: false
+    criteria: 'openssl reports Protocol: TLSv1.3 and a valid Cipher; curl over HTTPS
+      returns 200 OK (or 301/200) with TLS:TLSv1.3.'
+  - check_id: val-3
+    source_device: workstation-2
+    commands: *id019
+    output:
+    - "curl -s -m 3 -o /dev/null -w \"%{http_code}\\n\" http://10.0.0\r0.10/ || echo\
+      \ \"HTTP connection failed as expected\"\r\n\e[?2004l\r000\r\nHTTP connection\
+      \ failed as expected\r\n\e[?2004h\e]0;root@workstation-2: /\aroot@workstation-2:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@workstation-2: /\aroot@workstation-2:/#"
+    - "sh -c 'nc -zv -w3 10.0.0.10 80 || echo \"Port 80 blocked as \r expected\"'\r\
+      \n\e[?2004l\rnc: connect to 10.0.0.10 port 80 (tcp) failed: Connection refused\r\
+      \nPort 80 blocked as expected\r\n\e[?2004h\e]0;root@workstation-2: /\aroot@workstation-2:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@workstation-2: /\aroot@workstation-2:/#"
+    success: false
+    criteria: HTTP connection fails (no 200 OK), and TCP port 80 cannot be established.
+  - check_id: val-4
+    source_device: firewall
+    commands: *id020
+    output:
+    - "iptables -L FORWARD -n -v --line-numbers\r\n\e[?2004l\rChain FORWARD (policy\
+      \ ACCEPT 25 packets, 2118 bytes)\r\nnum   pkts bytes target     prot opt in\
+      \     out     source               destination         \r\n1        9   756\
+      \ DROP       1    --  eth0   eth1    10.0.0.0/24          192.168.1.0/24   \
+      \   \r\n2        2   120 ACCEPT     6    --  *      *       192.168.1.0/24 \
+      \      10.0.0.10            tcp dpt:443 state NEW,ESTABLISHED\r\n3        2\
+      \    80 ACCEPT     6    --  *      *       10.0.0.10            192.168.1.0/24\
+      \       tcp spt:443 state ESTABLISHED\r\n4        2   120 REJECT     6    --\
+      \  *      *       192.168.1.0/24       10.0.0.10            tcp dpt:80 reject-with\
+      \ tcp-reset\r\n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -S FORWARD\r\n\e[?2004l\r-P FORWARD ACCEPT\r\n-A FORWARD -s 10.0.0.0/24\
+      \ -d 192.168.1.0/24 -i eth0 -o eth1 -p icmp -j DROP\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d 10.0.0.10/32 -p tcp -m tcp --dport 443 -m state --state NEW,ESTABLISHED\
+      \ -j ACCEPT\r\n-A FORWARD -s 10.0.0.10/32 -d 192.168.1.0/24 -p tcp -m tcp --sport\
+      \ 443 -m state --state ESTABLISHED -j ACCEPT\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d 10.0.0.10/32 -p tcp -m tcp --dport 80 -j REJECT --reject-with tcp-reset\r\
+      \n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: Rules present that ACCEPT tcp/443 from 192.168.1.0/24 to 10.0.0.10 (and
+      ESTABLISHED return) and REJECT tcp/80 from 192.168.1.0/24 to 10.0.0.10.
+- policy_id: pol-tls13-apache-0001
+  intent:
+    raw: configure TLS 1.3 on the apache-server and enable it
+    summary: Enable HTTPS with TLS 1.3 support on apache-server and activate the service.
+    assumptions:
+    - apache-server runs Apache HTTPD 2.4.36+ with OpenSSL 1.1.1+ (required for TLS
+      1.3).
+    - If no PKI/cert is available, a self-signed certificate is acceptable for initial
+      enablement.
+    - Backward compatibility is desired; TLS 1.2 will remain enabled alongside TLS
+      1.3 unless explicitly restricted later.
+    - Firewall may require TCP/443 allowance between west-lan (192.168.1.0/24) and
+      apache-server (10.0.0.10); steps provided assume iptables-based filtering on
+      firewall.
+    - Containerized services accept apachectl/a2enmod/a2ensite commands via shell
+      and do not require systemd.
+  policy_rules:
+  - rule_id: rule-apache-tls13-enable
+    description: Configure Apache on apache-server to support and prefer TLS 1.3 and
+      enable HTTPS on TCP/443 with a certificate.
+    targets:
+    - apache-server
+    action: configure
+    constraints:
+    - Enable mod_ssl and headers modules.
+    - Install or generate certificate and key at /etc/ssl/certs/apache-selfsigned.crt
+      and /etc/ssl/private/apache-selfsigned.key.
+    - Set SSLProtocol to allow TLSv1.2 and TLSv1.3; prefer TLSv1.3 ciphers.
+    - Activate default SSL virtual host and reload Apache cleanly.
+  - rule_id: rule-firewall-allow-https
+    description: Permit HTTPS traffic (TCP/443) from west-lan (192.168.1.0/24) to
+      apache-server (10.0.0.10) through firewall if filtering is enabled.
+    targets:
+    - firewall
+    action: permit
+    constraints:
+    - Apply stateful iptables rules in FORWARD chain for new and established flows.
+    - Idempotent insertion using iptables -C ... || iptables -A ... pattern.
+    - Only necessary if default policy or existing rules block inter-subnet forwarding
+      to TCP/443.
+  enforcement_steps:
+  - step: 1
+    device: apache-server
+    method: telnet
+    commands:
+    - mkdir -p /etc/ssl/private /etc/ssl/certs
+    - a2enmod ssl || true
+    - a2enmod headers || true
+    notes: Ensure required Apache modules are enabled.
+  - step: 2
+    device: apache-server
+    method: telnet
+    commands:
+    - openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 3650 -keyout /etc/ssl/private/apache-selfsigned.key
+      -out /etc/ssl/certs/apache-selfsigned.crt -subj "/C=US/ST=NA/L=Lab/O=ANS/OU=IT/CN=apache-server"
+      -addext subjectAltName=DNS:apache-server,IP:10.0.0.10
+    notes: Generate a long-lived self-signed RSA certificate; replace with CA-signed
+      certs later if available.
+  - step: 3
+    device: apache-server
+    method: telnet
+    commands:
+    - 'bash -lc ''cat > /etc/apache2/conf-available/ssl-params.conf << "EOF"\n# Enforce
+      TLS 1.2 and 1.3 only\nSSLProtocol -all +TLSv1.2 +TLSv1.3\n\n# Cipher policy:
+      set for TLS <= 1.2\nSSLCipherSuite ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256\n\n#
+      Cipher policy for TLS 1.3\nSSLCipherSuite TLSv1.3 TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256\n\n#
+      Optional security headers\nHeader always set Strict-Transport-Security "max-age=63072000;
+      includeSubDomains; preload"\nEOF'''
+    notes: Global SSL/TLS parameters including TLSv1.3 cipher suites. Apache merges
+      these with vhost settings.
+  - step: 4
+    device: apache-server
+    method: telnet
+    commands:
+    - 'bash -lc ''cat > /etc/apache2/sites-available/default-ssl.conf << "EOF"\n<IfModule
+      mod_ssl.c>\n<VirtualHost _default_:443>\n    ServerAdmin webmaster@localhost\n    ServerName
+      apache-server\n    DocumentRoot /var/www/html\n\n    SSLEngine on\n    # Restrict
+      protocols to TLS 1.2 and 1.3 (TLS 1.3 preferred).\n    SSLProtocol -all +TLSv1.2
+      +TLSv1.3\n    # TLS 1.3 cipher suites\n    SSLCipherSuite TLSv1.3 TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256\n    #
+      Pre-TLS 1.3 cipher suites\n    SSLCipherSuite ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256\n\n    SSLCertificateFile
+      /etc/ssl/certs/apache-selfsigned.crt\n    SSLCertificateKeyFile /etc/ssl/private/apache-selfsigned.key\n\n    <Directory
+      /var/www/html>\n        Require all granted\n        AllowOverride All\n    </Directory>\n\n    ErrorLog
+      ${APACHE_LOG_DIR}/error.log\n    CustomLog ${APACHE_LOG_DIR}/access.log combined\n</VirtualHost>\n</IfModule>\nEOF'''
+    notes: Define the SSL-enabled virtual host on port 443 with TLS 1.3 enabled.
+  - step: 5
+    device: apache-server
+    method: telnet
+    commands:
+    - a2ensite default-ssl || true
+    - a2enconf ssl-params || true
+    - apachectl -t
+    notes: Enable SSL site and config; verify Apache configuration syntax.
+  - step: 6
+    device: apache-server
+    method: telnet
+    commands:
+    - apachectl -k graceful
+    - sleep 2
+    - ss -tlnp | grep ':443' || (echo 'Port 443 not listening' && exit 1)
+    notes: Reload Apache and verify that it is listening on TCP/443.
+  - step: 7
+    device: firewall
+    method: telnet
+    commands: &id021
+    - iptables -C FORWARD -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 443 -m state
+      --state NEW,ESTABLISHED -j ACCEPT || iptables -A FORWARD -s 192.168.1.0/24 -d
+      10.0.0.10 -p tcp --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT
+    - iptables -C FORWARD -s 10.0.0.10 -d 192.168.1.0/24 -p tcp --sport 443 -m state
+      --state ESTABLISHED -j ACCEPT || iptables -A FORWARD -s 10.0.0.10 -d 192.168.1.0/24
+      -p tcp --sport 443 -m state --state ESTABLISHED -j ACCEPT
+    - iptables -C FORWARD -p tcp --dport 443 -j ACCEPT >/dev/null 2>&1 || true
+    notes: Permit HTTPS forwarding between west-lan and apache-server. Idempotent
+      rules; adjust or persist as per firewall policy. This step is only necessary
+      if existing policy blocks such traffic.
+  validation_checks:
+  - check_id: val-apache-modules
+    description: Confirm Apache SSL module is loaded on apache-server.
+    type: config
+    source_device: apache-server
+    commands:
+    - apachectl -M | grep -i ssl || (echo 'mod_ssl not loaded' && exit 1)
+    success_criteria: Output includes ssl_module indicating mod_ssl is active.
+  - check_id: val-apache-port443
+    description: Verify apache-server is listening on TCP/443.
+    type: runtime
+    source_device: apache-server
+    commands:
+    - ss -tlnp | grep ':443'
+    success_criteria: A listening socket for :443 is present and bound to Apache.
+  - check_id: val-client-tls13-openssl
+    description: From workstation-1, perform a TLS 1.3 handshake to apache-server.
+    type: transaction
+    source_device: workstation-1
+    commands:
+    - openssl s_client -connect 10.0.0.10:443 -tls1_3 -servername apache-server -brief
+      </dev/null | egrep 'Protocol|Cipher'
+    success_criteria: 'Output shows ''Protocol: TLSv1.3'' and a valid TLS 1.3 cipher
+      (e.g., TLS_AES_256_GCM_SHA384 or TLS_CHACHA20_POLY1305_SHA256).'
+  - check_id: val-client-tls13-curl
+    description: From workstation-1, fetch HTTPS headers using TLS 1.3.
+    type: transaction
+    source_device: workstation-1
+    commands:
+    - curl -k -I --tlsv1.3 https://10.0.0.10/
+    success_criteria: HTTP response headers are returned (e.g., HTTP/1.1 200 OK or
+      301/302), confirming TLS 1.3 connectivity.
+  - check_id: val-firewall-forwarding
+    description: Confirm firewall has an ACCEPT rule for TCP/443 forwarding from west-lan
+      to apache-server.
+    type: inspection
+    source_device: firewall
+    commands:
+    - iptables -S FORWARD | egrep '\-s 192\.168\.1\.0/24 \-d 10\.0\.0\.10 \-p tcp
+      \-\-dport 443 .*ACCEPT'
+    - iptables -S FORWARD | egrep '\-s 10\.0\.0\.10 \-d 192\.168\.1\.0/24 \-p tcp
+      .*\-\-sport 443 .*ACCEPT'
+    success_criteria: Matching ACCEPT rules for new and established TCP/443 flows
+      are present in the FORWARD chain.
+  status:
+    translation: completed
+    resolution: completed
+    activation: failed
+    assurance: pending
+    last_updated: '2025-10-15T05:49:35.854003Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+  notes: This policy enables TLS 1.3 on apache-server while retaining TLS 1.2 for
+    compatibility. It generates a self-signed certificate for immediate activation;
+    replace with a trusted certificate as needed. Optional firewall rules are included
+    for end-to-end reachability from workstations to the server over TCP/443.
+  activation_logs:
+  - device: firewall
+    commands: *id021
+    output:
+    - "iptables -C FORWARD -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dpor\rrt 443 -m\
+      \ state --state NEW,ESTABLISHED -j ACCEPT || iptables -A FORWARD -s 192.1\r\
+      168.1.0/24 -d 10.0.0.10 -p tcp --dport 443 -m state --state NEW,ESTABLISHED\
+      \ -j AC\rCCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -C FORWARD -s 10.0.0.10 -d 192.168.1.0/24 -p tcp --spor\rrt 443 -m\
+      \ state --state ESTABLISHED -j ACCEPT || iptables -A FORWARD -s 10.0.0.10\r\
+      0 -d 192.168.1.0/24 -p tcp --sport 443 -m state --state ESTABLISHED -j ACCEPT\r\
+      \n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -C FORWARD -p tcp --dport 443 -j ACCEPT >/dev/null 2>&1\r1 || true\r\
+      \n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+- policy_id: POL-ans-semester-project-0007
+  intent:
+    raw: Enable TLS 1.3 in the apache server so that all communivations from the east
+      Lan to the webserver in the west LAN is encrypted
+    summary: Enforce TLS 1.3-only HTTPS to the apache-server and block plaintext HTTP
+      so client-to-server traffic is encrypted end-to-end.
+    assumptions:
+    - The 'apache server' refers to the node named 'apache-server' (10.0.0.10) located
+      in the east-lan (10.0.0.0/24).
+    - The phrase 'webserver in the west LAN' is a wording error; intent is to secure
+      traffic from west-lan clients (192.168.1.0/24) to the apache-server in east-lan.
+    - Self-signed certificate is acceptable for encryption (clients may see trust
+      warnings, but traffic will be encrypted).
+    - The apache-server image has or can install Apache HTTP Server and OpenSSL with
+      TLS 1.3 support.
+    - Firewall device is the default gateway for west-lan (192.168.1.100) and can
+      enforce FORWARD chain policies.
+  policy_rules:
+  - rule_id: RULE-TLS13-APACHE
+    description: Enable and enforce TLS 1.3-only on apache-server, enable HTTPS virtual
+      host, redirect HTTP to HTTPS, and add HSTS.
+    targets:
+    - apache-server
+    action: configure
+    constraints:
+    - Only TLSv1.3 is permitted (disable TLSv1.0-1.2).
+    - Listen on TCP/443 with valid key/cert (self-signed acceptable).
+    - HTTP (TCP/80) must redirect to HTTPS.
+    - Add HSTS header to enforce HTTPS on clients.
+  - rule_id: RULE-FW-BLOCK-HTTP
+    description: Allow west-lan to reach apache-server over TCP/443 and block TCP/80
+      to enforce encryption at the perimeter.
+    targets:
+    - firewall
+    action: filter
+    constraints:
+    - Apply in FORWARD chain.
+    - 'Permit: src 192.168.1.0/24 -> dst 10.0.0.10 tcp/443.'
+    - 'Deny/Reject: src 192.168.1.0/24 -> dst 10.0.0.10 tcp/80.'
+    - Preserve ESTABLISHED,RELATED flows.
+  - rule_id: RULE-R2-ACL-HTTP-DENY
+    description: Add a backup denial on R2 to block TCP/80 to apache-server from west-lan
+      over the R1-R2 transit.
+    targets:
+    - R2
+    action: filter
+    constraints:
+    - Create extended ACL and apply inbound on Serial1/0.
+    - 'Deny: tcp 192.168.1.0/24 -> host 10.0.0.10 eq 80.'
+    - Permit all else to avoid unintended disruption.
+  enforcement_steps:
+  - step: 1
+    device: apache-server
+    method: telnet
+    commands: &id022
+    - apt-get update
+    - apt-get install -y apache2 openssl
+    - mkdir -p /etc/ssl/private
+    - openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/apache-selfsigned.key
+      -out /etc/ssl/certs/apache-selfsigned.crt -subj "/CN=apache-server"
+    - a2enmod ssl
+    - a2enmod headers
+    - a2enmod rewrite
+    - 'bash -lc ''cat >/etc/apache2/conf-available/ssl-hardening.conf <<"EOF"
+
+      SSLProtocol -all +TLSv1.3
+
+      SSLCipherSuite TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256
+
+      SSLHonorCipherOrder off
+
+      SSLCompression off
+
+      EOF'''
+    - a2enconf ssl-hardening
+    - sed -i 's|^\s*SSLCertificateFile\s\+.*|SSLCertificateFile /etc/ssl/certs/apache-selfsigned.crt|'
+      /etc/apache2/sites-available/default-ssl.conf
+    - sed -i 's|^\s*SSLCertificateKeyFile\s\+.*|SSLCertificateKeyFile /etc/ssl/private/apache-selfsigned.key|'
+      /etc/apache2/sites-available/default-ssl.conf
+    - "bash -lc 'grep -q \"Strict-Transport-Security\" /etc/apache2/conf-available/ssl-headers.conf\
+      \ 2>/dev/null || cat >/etc/apache2/conf-available/ssl-headers.conf <<\"EOF\"\
+      \n<IfModule mod_headers.c>\n  Header always set Strict-Transport-Security \"\
+      max-age=63072000; includeSubDomains; preload\"\n</IfModule>\nEOF'"
+    - a2enconf ssl-headers
+    - "bash -lc 'cat >/etc/apache2/sites-available/redirect-to-https.conf <<\"EOF\"\
+      \n<VirtualHost *:80>\n  ServerName 10.0.0.10\n  Redirect permanent / https://10.0.0.10/\n\
+      </VirtualHost>\nEOF'"
+    - a2ensite redirect-to-https
+    - a2ensite default-ssl
+    - apache2ctl configtest
+    - apache2ctl -k graceful
+    notes: Enables TLSv1.3-only, HTTPS vhost, HTTP->HTTPS redirect, and HSTS. Self-signed
+      certificate used; replace with trusted CA certs for production.
+  - step: 2
+    device: firewall
+    method: telnet
+    commands: &id023
+    - iptables -I FORWARD 1 -m state --state ESTABLISHED,RELATED -j ACCEPT
+    - iptables -I FORWARD 2 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 443 -j ACCEPT
+    - iptables -I FORWARD 3 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 80 -j REJECT
+      --reject-with tcp-reset
+    - iptables -L FORWARD -n --line-numbers
+    notes: Rules enforce encryption by allowing 443 and rejecting 80 from west-lan
+      to apache-server. Ensure IP forwarding and base policy are already configured
+      in the firewall container.
+  - step: 3
+    device: R2
+    method: telnet
+    commands: &id024
+    - enable
+    - configure terminal
+    - ip access-list extended ENCRYPT_WEB_ONLY
+    - deny tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 80
+    - permit ip any any
+    - exit
+    - interface Serial1/0
+    - ip access-group ENCRYPT_WEB_ONLY in
+    - end
+    - write memory
+    - show access-lists ENCRYPT_WEB_ONLY
+    - show ip interface Serial1/0
+    notes: Backup control at the R2 edge toward east-lan to deny TCP/80 from west-lan
+      to apache-server over the R1-R2 transit.
+  validation_checks:
+  - check_id: VAL-APACHE-TLS13-CONFIG
+    description: Confirm Apache is serving only TLS 1.3 and HTTPS site is enabled.
+    type: config
+    source_device: apache-server
+    commands: &id025
+    - apache2ctl -M | grep -E 'ssl_module|headers_module'
+    - grep -R "^SSLProtocol" /etc/apache2/conf-available/ssl-hardening.conf
+    - grep -R "Strict-Transport-Security" /etc/apache2/conf-available/ssl-headers.conf
+    - apache2ctl -S
+    success_criteria: ssl_module and headers_module are loaded; SSLProtocol shows
+      '-all +TLSv1.3'; HSTS header configured; default-ssl and redirect-to-https vhosts
+      are enabled with no config errors.
+  - check_id: VAL-FW-RULES-APPLIED
+    description: Verify firewall is allowing 443 and rejecting 80 from west-lan to
+      apache-server.
+    type: state
+    source_device: firewall
+    commands: &id026
+    - iptables -S FORWARD | grep 10.0.0.10
+    - iptables -L FORWARD -n --line-numbers
+    success_criteria: FORWARD chain shows ACCEPT for tcp dpt:443 and REJECT for tcp
+      dpt:80 from 192.168.1.0/24 to 10.0.0.10 in correct order, with ESTABLISHED,RELATED
+      allowed.
+  - check_id: VAL-R2-ACL-APPLIED
+    description: Ensure R2 ACL is attached and denying http to apache-server.
+    type: state
+    source_device: R2
+    commands: &id027
+    - show access-lists ENCRYPT_WEB_ONLY
+    - show ip interface Serial1/0 | include ENCRYPT_WEB_ONLY
+    success_criteria: ACL ENCRYPT_WEB_ONLY contains 'deny tcp 192.168.1.0 0.0.0.255
+      host 10.0.0.10 eq 80' and is applied inbound on Serial1/0.
+  - check_id: VAL-CLIENT-HTTPS-TLS13
+    description: From a west-lan client, verify HTTPS over TLS 1.3 to apache-server
+      succeeds.
+    type: transaction
+    source_device: workstation-1
+    commands: &id028
+    - openssl s_client -connect 10.0.0.10:443 -tls1_3 -brief < /dev/null | sed -n
+      '1,10p'
+    - curl -k --tlsv1.3 -I https://10.0.0.10/ || true
+    success_criteria: 'openssl output shows ''Protocol  : TLSv1.3'' and curl returns
+      an HTTP response code (200/301/302) over HTTPS.'
+  - check_id: VAL-CLIENT-HTTP-BLOCKED
+    description: From a west-lan client, verify plaintext HTTP to apache-server is
+      blocked.
+    type: transaction
+    source_device: workstation-2
+    commands: &id029
+    - curl -I http://10.0.0.10/ || true
+    - nc -zv 10.0.0.10 80 || true
+    success_criteria: HTTP attempt fails (connection reset/timeout) and TCP port 80
+      scan fails, indicating HTTP is not reachable.
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T05:53:00.116567Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check VAL-APACHE-TLS13-CONFIG did not meet criteria 'ssl_module and
+      headers_module are loaded; SSLProtocol shows '-all +TLSv1.3'; HSTS header configured;
+      default-ssl and redirect-to-https vhosts are enabled with no config errors.'
+    - Validation check VAL-FW-RULES-APPLIED did not meet criteria 'FORWARD chain shows
+      ACCEPT for tcp dpt:443 and REJECT for tcp dpt:80 from 192.168.1.0/24 to 10.0.0.10
+      in correct order, with ESTABLISHED,RELATED allowed.'
+    - Validation check VAL-R2-ACL-APPLIED did not meet criteria 'ACL ENCRYPT_WEB_ONLY
+      contains 'deny tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 80' and is applied
+      inbound on Serial1/0.'
+    - 'Validation check VAL-CLIENT-HTTPS-TLS13 did not meet criteria ''openssl output
+      shows ''Protocol  : TLSv1.3'' and curl returns an HTTP response code (200/301/302)
+      over HTTPS.'''
+    - Validation check VAL-CLIENT-HTTP-BLOCKED did not meet criteria 'HTTP attempt
+      fails (connection reset/timeout) and TCP port 80 scan fails, indicating HTTP
+      is not reachable.'
+  notes: This policy enforces encryption in transit by enabling TLS 1.3-only on apache-server
+    and preventing HTTP (tcp/80) from west-lan to 10.0.0.10 at the firewall, with
+    an additional safeguard ACL on R2. Self-signed certificates secure the channel
+    but are untrusted by default; replace with a CA-signed certificate for production.
+    If the apache-server image lacks OpenSSL 1.1.1+ or Apache 2.4.36+, TLS 1.3 may
+    not be available and the image should be updated.
+  activation_logs:
+  - device: apache-server
+    commands: *id022
+    output:
+    - "apt-get update\r\n\e[?2004l\r\r0% [Working]\r            \rIgn:1 http://deb.debian.org/debian\
+      \ bookworm InRelease\r\n\r0% [Working]\r            \rIgn:2 http://deb.debian.org/debian\
+      \ bookworm-updates InRelease\r\n\r0% [Connecting to deb.debian.org]\r      \
+      \                           \rIgn:3 http://deb.debian.org/debian-security bookworm-security\
+      \ InRelease\r\n\r                                 \r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r            \rIgn:1 http://deb.debian.org/debian\
+      \ bookworm InRelease\r\n\r0% [Working]\r            \rIgn:2 http://deb.debian.org/debian\
+      \ bookworm-updates InRelease\r\n\r0% [Working]\r            \rIgn:3 http://deb.debian.org/debian-security\
+      \ bookworm-security InRelease\r\n\r0% [Working]\r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r0% [Working]\r            \rIgn:1 http://deb.debian.org/debian\
+      \ bookworm InRelease\r\n\r0% [Working]\r            \rIgn:2 http://deb.debian.org/debian\
+      \ bookworm-updates InRelease\r\n\r0% [Connecting to deb.debian.org]\r      \
+      \                           \rIgn:3 http://deb.debian.org/debian-security bookworm-security\
+      \ InRelease\r\n\r                                 \r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r0% [Working]\r\
+      0% [Working]\r0% [Working]\r            \rErr:1 http://deb.debian.org/debian\
+      \ bookworm InRelease\r\n  Temporary failure resolving 'deb.debian.org'\r\n\r\
+      0% [Working]\r            \rErr:2 http://deb.debian.org/debian bookworm-updates\
+      \ InRelease\r\n  Temporary failure resolving 'deb.debian.org'\r\n\r0% [Working]\r\
+      \            \rErr:3 http://deb.debian.org/debian-security bookworm-security\
+      \ InRelease\r\n  Temporary failure resolving 'deb.debian.org'\r\n\r0% [Working]\r\
+      \            \r\rReading package lists... 0%\r\rReading package lists... 0%\r\
+      \rReading package lists... 65%\r\rReading package lists... Done\r\r\nW: Failed\
+      \ to fetch http://deb.debian.org/debian/dists/bookworm/InRelease  Temporary\
+      \ failure resolving 'deb.debian.org'\r\nW: Failed to fetch http://deb.debian.org/debian/dists/bookworm-updates/InRelease\
+      \  Temporary failure resolving 'deb.debian.org'\r\nW: Failed to fetch http://deb.debian.org/debian-security/dists/bookworm-security/InRelease\
+      \  Temporary failure resolving 'deb.debian.org'\r\nW: Some index files failed\
+      \ to download. They have been ignored, or old ones used instead.\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "apt-get install -y apache2 openssl\r\n\e[?2004l\r\rReading package lists...\
+      \ 0%\r\rReading package lists... 0%\r\rReading package lists... 65%\r\rReading\
+      \ package lists... Done\r\r\n\rBuilding dependency tree... 0%\r\rBuilding dependency\
+      \ tree... 0%\r\rBuilding dependency tree... 50%\r\rBuilding dependency tree...\
+      \ 50%\r\rBuilding dependency tree... Done\r\r\n\rReading state information...\
+      \ 0% \r\rReading state information... 0%\r\rReading state information... Done\r\
+      \r\napache2 is already the newest version (2.4.65-1~deb12u1).\r\nopenssl is\
+      \ already the newest version (3.0.17-1~deb12u3).\r\n0 upgraded, 0 newly installed,\
+      \ 0 to remove and 0 not upgraded.\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/#"
+    - "mkdir -p /etc/ssl/private\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\
+      \e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout\rt /etc/ssl/private/apache-selfsigned.key\
+      \ -out /etc/ssl/certs/apache-selfsigned.cr\rrt -subj \"/CN=apache-server\"\r\
+      \n\e[?2004l\r...+..+.........+.+...........+.......+..+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*...+..+.+..............+.+..+....+.....+...+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*..+.....+...............+.......+..+.......+...+..+..........+...+..+....+.....+.........+.+..+............+......+.+...+...+..+.+......+.....+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\r\
+      \n.+...+....+...+........+.+...+...+..+.+............+........+.+...+..+..........+...........+...+......+.+..+.+..............+.+......+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*......+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*..+...........+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\r\
+      \n-----\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2enmod ssl\r\n\e[?2004l\rConsidering dependency setenvif for ssl:\r\nModule\
+      \ setenvif already enabled\r\nConsidering dependency mime for ssl:\r\nModule\
+      \ mime already enabled\r\nConsidering dependency socache_shmcb for ssl:\r\n\
+      Module socache_shmcb already enabled\r\nModule ssl already enabled\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2enmod headers\r\n\e[?2004l\rModule headers already enabled\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2enmod rewrite\r\n\e[?2004l\rModule rewrite already enabled\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "bash -lc 'cat >/etc/apache2/conf-available/ssl-hardening.co\ronf <<\"EOF\"\r\
+      \n\e[?2004l\r\e[?2004h> SSLProtocol -all +TLSv1.3\r\n\e[?2004l\r\e[?2004h> SSLCipherSuite\
+      \ TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_\r_GCM_SHA256\r\
+      \n\e[?2004l\r\e[?2004h> SSLHonorCipherOrder off\r\n\e[?2004l\r\e[?2004h> SSLCompression\
+      \ off\r\n\e[?2004l\r\e[?2004h> EOF'\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2enconf ssl-hardening\r\n\e[?2004l\rConf ssl-hardening already enabled\r\n\
+      \e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "sed -i 's|^\\s*SSLCertificateFile\\s\\+.*|SSLCertificateFile /\r/etc/ssl/certs/apache-selfsigned.crt|'\
+      \ /etc/apache2/sites-available/default-ssl.c\rconf\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "sed -i 's|^\\s*SSLCertificateKeyFile\\s\\+.*|SSLCertificateKey\ryFile /etc/ssl/private/apache-selfsigned.key|'\
+      \ /etc/apache2/sites-available/defau\rult-ssl.conf\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "bash -lc 'grep -q \"Strict-Transport-Security\" /etc/apache2/\r/conf-available/ssl-headers.conf\
+      \ 2>/dev/null || cat >/etc/apache2/conf-available/\r/ssl-headers.conf <<\"EOF\"\
+      \r\n\e[?2004l\r\e[?2004h> <IfModule mod_headers.c>\r\n\e[?2004l\r\e[?2004h>\
+      \   Header always set Strict-Transport-Security \"max-age=63072000; includeSubDoma\r\
+      ains; preload\"\r\n\e[?2004l\r\e[?2004h> </IfModule>\r\n\e[?2004l\r\e[?2004h>\
+      \ EOF'\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2enconf ssl-headers\r\n\e[?2004l\rConf ssl-headers already enabled\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "bash -lc 'cat >/etc/apache2/sites-available/redirect-to-htt\rtps.conf <<\"\
+      EOF\"\r\n\e[?2004l\r\e[?2004h> <VirtualHost *:80>\r\n\e[?2004l\r\e[?2004h> \
+      \  ServerName 10.0.0.10\r\n\e[?2004l\r\e[?2004h>   Redirect permanent / https://10.0.0.10/\r\
+      \n\e[?2004l\r\e[?2004h> </VirtualHost>\r\n\e[?2004l\r\e[?2004h> EOF'\r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2ensite redirect-to-https\r\n\e[?2004l\rSite redirect-to-https already enabled\r\
+      \n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "a2ensite default-ssl\r\n\e[?2004l\rSite default-ssl already enabled\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "apache2ctl configtest\r\n\e[?2004l\rSyntax OK\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "apache2ctl -k graceful\r\n\e[?2004l\rhttpd not running, trying to start\r\n\
+      Action '-k graceful' failed.\r\nThe Apache error log may have more information.\r\
+      \n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+  - device: firewall
+    commands: *id023
+    output:
+    - "iptables -I FORWARD 1 -m state --state ESTABLISHED,RELATED -j AC\rCCEPT\r\n\
+      \e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 2 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dp\rport 443\
+      \ -j ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e\
+      [K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 3 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dp\rport 80 -j\
+      \ REJECT --reject-with tcp-reset\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -L FORWARD -n --line-numbers\r\n\e[?2004l\rChain FORWARD (policy ACCEPT)\r\
+      \nnum  target     prot opt source               destination         \r\n1  \
+      \  ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n2    ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n3    REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n4    ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n5    ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n6    REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n7    ACCEPT\
+      \     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n8    ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n9    REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n10   ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n11   ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n12   REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n13   ACCEPT\
+      \     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n14   ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n15   REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n16   ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n17   ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n18   REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n19   ACCEPT\
+      \     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n20   ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n21   REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n22   DROP       1    --  10.0.0.0/24          192.168.1.0/24\
+      \      \r\n23   ACCEPT     6    --  192.168.1.0/24       10.0.0.10         \
+      \   tcp dpt:443 state NEW,ESTABLISHED\r\n24   ACCEPT     6    --  10.0.0.10\
+      \            192.168.1.0/24       tcp spt:443 state ESTABLISHED\r\n25   REJECT\
+      \     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80 reject-with\
+      \ tcp-reset\r\n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+  - device: R2
+    commands: *id024
+    output:
+    - "enable\r\nR2#"
+    - "configure terminal\r\nEnter configuration commands, one per line.  End with\
+      \ CNTL/Z.\r\nR2(config)#"
+    - "ip access-list extended ENCRYPT_WEB_ONLY\r\nR2(config-ext-nacl)#"
+    - "deny tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 80\r\nR2(config-ext-nacl)#"
+    - "permit ip any any\r\nR2(config-ext-nacl)#"
+    - "exit\r\nR2(config)#"
+    - "interface Serial1/0\r\nR2(config-if)#"
+    - "ip access-group ENCRYPT_WEB_ONLY in\r\nR2(config-if)#"
+    - "end\r\nR2#"
+    - "write memory\r\nWarning: Attempting to overwrite an NVRAM configuration previously\
+      \ written\r\nby a different version of the system image.\r\nOverwrite the previous\
+      \ NVRAM configuration?[confirm]"
+    - "s\r\nNo action taken because command was not confirmed\r\nR2#how access-lists\
+      \ ENCRYPT_WEB_ONLY\r\n    ^\r\n% Invalid input detected at '^' marker.\r\n\r\
+      \nR2#\r\n*Oct 15 04:54:28.053: %SYS-5-CONFIG_I: Configured from console by console\r\
+      \nR2#"
+    - "show ip interface Serial1/0\r\nSerial1/0 is up, line protocol is up\r\n  Internet\
+      \ address is 172.16.0.2/24\r\n  Broadcast address is 255.255.255.255\r\n  Address\
+      \ determined by setup command\r\n  MTU is 1500 bytes\r\n  Helper address is\
+      \ not set\r\n  Directed broadcast forwarding is disabled\r\n  Outgoing access\
+      \ list is not set\r\n  Inbound  access list is ENCRYPT_WEB_ONLY\r\n  Proxy ARP\
+      \ is enabled\r\n  Local Proxy ARP is disabled\r\n  Security level is default\r\
+      \n  Split horizon is enabled\r\n  ICMP redirects are always sent\r\n  ICMP unreachables\
+      \ are always sent\r\n  ICMP mask replies are never sent\r\n  IP fast switching\
+      \ is enabled\r\n  IP Flow switching is disabled\r\n  IP CEF switching is enabled\r\
+      \n  IP CEF switching turbo vector\r\n  IP CEF turbo switching turbo vector\r\
+      \n  Associated unicast routing topologies:\r\n        Topology \"base\", operation\
+      \ state is UP\r\n --More--"
+  assurance_results:
+  - check_id: VAL-APACHE-TLS13-CONFIG
+    source_device: apache-server
+    commands: *id025
+    output:
+    - "apache2ctl -M | grep -E 'ssl_module|headers_module'\r\n\e[?2004l\r headers_module\
+      \ (shared)\r\n ssl_module (shared)\r\n\e[?2004hroot@apache-server:/# \r\n\e\
+      [?2004l\r\e[?2004hroot@apache-server:/#"
+    - "grep -R \"^SSLProtocol\" /etc/apache2/conf-available/ssl-hard\rdening.conf\r\
+      \n\e[?2004l\rSSLProtocol -all +TLSv1.3\r\n\e[?2004hroot@apache-server:/# \r\n\
+      \e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "grep -R \"Strict-Transport-Security\" /etc/apache2/conf-avail\rlable/ssl-headers.conf\r\
+      \n\e[?2004l\r  Header always set Strict-Transport-Security \"max-age=63072000;\
+      \ includeSubDomains; preload\"\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/#"
+    - "apache2ctl -S\r\n\e[?2004l\rVirtualHost configuration:\r\n*:443           \
+      \       localhost (/etc/apache2/sites-enabled/default-ssl.conf:1)\r\n*:80  \
+      \                 is a NameVirtualHost\r\n         default server localhost\
+      \ (/etc/apache2/sites-enabled/000-default.conf:1)\r\n         port 80 namevhost\
+      \ localhost (/etc/apache2/sites-enabled/000-default.conf:1)\r\n         port\
+      \ 80 namevhost 10.0.0.10 (/etc/apache2/sites-enabled/redirect-to-https.conf:1)\r\
+      \nServerRoot: \"/etc/apache2\"\r\nMain DocumentRoot: \"/var/www/html\"\r\nMain\
+      \ ErrorLog: \"/var/log/apache2/error.log\"\r\nMutex rewrite-map: using_defaults\r\
+      \nMutex ssl-stapling-refresh: using_defaults\r\nMutex ssl-stapling: using_defaults\r\
+      \nMutex ssl-cache: using_defaults\r\nMutex default: dir=\"/var/run/apache2/\"\
+      \ mechanism=default \r\nMutex watchdog-callback: using_defaults\r\nPidFile:\
+      \ \"/var/run/apache2/apache2.pid\"\r\nDefine: DUMP_VHOSTS\r\nDefine: DUMP_RUN_CFG\r\
+      \nUser: name=\"www-data\" id=33\r\nGroup: name=\"www-data\" id=33\r\n\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    success: false
+    criteria: ssl_module and headers_module are loaded; SSLProtocol shows '-all +TLSv1.3';
+      HSTS header configured; default-ssl and redirect-to-https vhosts are enabled
+      with no config errors.
+  - check_id: VAL-FW-RULES-APPLIED
+    source_device: firewall
+    commands: *id026
+    output:
+    - "iptables -S FORWARD | grep 10.0.0.10\r\n\e[?2004l\r-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -j ACCEPT\r\
+      \n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m\
+      \ tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n-A FORWARD -s 192.168.1.0/24\
+      \ -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32 -p tcp -m tcp --dport 443 -m state --state\
+      \ NEW,ESTABLISHED -j ACCEPT\r\n-A FORWARD -s \e[01;31m\e[K10.0.0.10\e[m\e[K/32\
+      \ -d 192.168.1.0/24 -p tcp -m tcp --sport 443 -m state --state ESTABLISHED -j\
+      \ ACCEPT\r\n-A FORWARD -s 192.168.1.0/24 -d \e[01;31m\e[K10.0.0.10\e[m\e[K/32\
+      \ -p tcp -m tcp --dport 80 -j REJECT --reject-with tcp-reset\r\n\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/#"
+    - "iptables -L FORWARD -n --line-numbers\r\n\e[?2004l\rChain FORWARD (policy ACCEPT)\r\
+      \nnum  target     prot opt source               destination         \r\n1  \
+      \  ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n2    ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n3    REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n4    ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n5    ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n6    REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n7    ACCEPT\
+      \     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n8    ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n9    REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n10   ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n11   ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n12   REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n13   ACCEPT\
+      \     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n14   ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n15   REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n16   ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n17   ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n18   REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n19   ACCEPT\
+      \     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n20   ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n21   REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n22   DROP       1    --  10.0.0.0/24          192.168.1.0/24\
+      \      \r\n23   ACCEPT     6    --  192.168.1.0/24       10.0.0.10         \
+      \   tcp dpt:443 state NEW,ESTABLISHED\r\n24   ACCEPT     6    --  10.0.0.10\
+      \            192.168.1.0/24       tcp spt:443 state ESTABLISHED\r\n25   REJECT\
+      \     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80 reject-with\
+      \ tcp-reset\r\n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: FORWARD chain shows ACCEPT for tcp dpt:443 and REJECT for tcp dpt:80
+      from 192.168.1.0/24 to 10.0.0.10 in correct order, with ESTABLISHED,RELATED
+      allowed.
+  - check_id: VAL-R2-ACL-APPLIED
+    source_device: R2
+    commands: *id027
+    output:
+    - "\b\b\b\b\b\b\b\b\b        \b\b\b\b\b\b\b\b\b\r\nR2#how access-lists ENCRYPT_WEB_ONLY\r\
+      \n    ^\r\n% Invalid input detected at '^' marker.\r\n\r\nR2#"
+    - "show ip interface Serial1/0 | include ENCRYPT_WEB_ONLY\r\n  Inbound  access\
+      \ list is ENCRYPT_WEB_ONLY\r\nR2#"
+    success: false
+    criteria: ACL ENCRYPT_WEB_ONLY contains 'deny tcp 192.168.1.0 0.0.0.255 host 10.0.0.10
+      eq 80' and is applied inbound on Serial1/0.
+  - check_id: VAL-CLIENT-HTTPS-TLS13
+    source_device: workstation-1
+    commands: *id028
+    output:
+    - "openssl s_client -connect 10.0.0.10:443 -tls1_3 -brief < /d\rdev/null | sed\
+      \ -n '1,10p'\r\n\e[?2004l"
+    - curl -k --tlsv1.3 -I https://10.0.0.10/ || true
+    success: false
+    criteria: 'openssl output shows ''Protocol  : TLSv1.3'' and curl returns an HTTP
+      response code (200/301/302) over HTTPS.'
+  - check_id: VAL-CLIENT-HTTP-BLOCKED
+    source_device: workstation-2
+    commands: *id029
+    output:
+    - "curl -I http://10.0.0.10/ || true\r\n\e[?2004l\rcurl: (7) Failed to connect\
+      \ to 10.0.0.10 port 80 after 0 ms: Couldn't connect to server\r\n\e[?2004h\e\
+      ]0;root@workstation-2: /\aroot@workstation-2:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@workstation-2: /\aroot@workstation-2:/#"
+    - "nc -zv 10.0.0.10 80 || true\r\n\e[?2004l\rnc: connect to 10.0.0.10 port 80\
+      \ (tcp) failed: Connection refused\r\n\e[?2004h\e]0;root@workstation-2: /\a\
+      root@workstation-2:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@workstation-2: /\a\
+      root@workstation-2:/#"
+    success: false
+    criteria: HTTP attempt fails (connection reset/timeout) and TCP port 80 scan fails,
+      indicating HTTP is not reachable.
+- policy_id: policy-tls13-apache-eastlan
+  intent:
+    raw: Enable TLS 1.3 in the apache server so that all communivations from the east
+      Lan to the webserver in the west LAN is encrypted
+    summary: Enforce TLS 1.3-only on the apache-server and ensure traffic between
+      west-lan clients and the web server is encrypted; block plaintext HTTP.
+    assumptions:
+    - apache-server (10.0.0.10/24) is the intended web server and resides in the east-lan.
+    - Clients in west-lan (192.168.1.0/24) access apache-server over the routed path
+      via firewall -> R1 -> R2.
+    - The phrase 'webserver in the west LAN' is a typo; objective is to protect traffic
+      from west-lan to the web server in east-lan.
+    - apache-server image supports Apache httpd with mod_ssl and OpenSSL 1.1.1+ (required
+      for TLS 1.3).
+    - firewall enforces IPv4 forwarding and can apply iptables filter rules on the
+      FORWARD chain.
+  policy_rules:
+  - rule_id: rule-1
+    description: Force TLS 1.3-only on apache-server and present a certificate for
+      HTTPS on TCP/443.
+    targets:
+    - apache-server
+    action: configure
+    constraints:
+    - Enable mod_ssl and configure SSLProtocol TLSv1.3
+    - Use strong TLS 1.3 cipher suites (AES-GCM and CHACHA20-POLY1305)
+    - Listen on TCP/443 and serve content from /var/www/html
+    - Install a self-signed certificate if no CA-issued cert is available
+  - rule_id: rule-2
+    description: Discourage plaintext by redirecting HTTP to HTTPS at apache-server
+      (where reachable).
+    targets:
+    - apache-server
+    action: configure
+    constraints:
+    - Enable mod_rewrite and HTTP->HTTPS redirect
+    - 'Note: west-lan HTTP will be blocked at firewall; redirect mainly affects same-segment
+      or other permitted sources'
+  - rule_id: rule-3
+    description: Allow HTTPS and block HTTP from west-lan (192.168.1.0/24) to apache-server
+      (10.0.0.10).
+    targets:
+    - firewall
+    action: filter
+    constraints:
+    - 'Allow FORWARD: tcp/443 from 192.168.1.0/24 to 10.0.0.10'
+    - 'Block FORWARD: tcp/80 from 192.168.1.0/24 to 10.0.0.10'
+    - Preserve return traffic via ESTABLISHED,RELATED state
+    - Do not otherwise alter existing policies
+  enforcement_steps:
+  - step: 1
+    device: apache-server
+    method: telnet
+    commands:
+    - openssl version
+    - a2enmod ssl headers rewrite
+    - mkdir -p /etc/ssl/private
+    - openssl req -x509 -nodes -newkey rsa:2048 -days 365 -keyout /etc/ssl/private/apache-selfsigned.key
+      -out /etc/ssl/certs/apache-selfsigned.crt -subj "/C=US/ST=NA/L=Lab/O=ANS/OU=IBN/CN=10.0.0.10"
+    - "bash -lc 'cat > /etc/apache2/sites-available/tls13.conf << \"EOF\"\n<VirtualHost\
+      \ *:443>\n    ServerName 10.0.0.10\n    DocumentRoot /var/www/html\n    SSLEngine\
+      \ on\n    SSLProtocol TLSv1.3\n    SSLCipherSuite TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256\n\
+      \    SSLCertificateFile /etc/ssl/certs/apache-selfsigned.crt\n    SSLCertificateKeyFile\
+      \ /etc/ssl/private/apache-selfsigned.key\n    Header always set Strict-Transport-Security\
+      \ \"max-age=63072000; includeSubDomains; preload\"\n    ErrorLog ${APACHE_LOG_DIR}/error_tls13.log\n\
+      \    CustomLog ${APACHE_LOG_DIR}/access_tls13.log combined\n</VirtualHost>\n\
+      EOF'"
+    - a2ensite tls13.conf
+    - "bash -lc 'cat > /etc/apache2/conf-available/redirect-http-to-https.conf <<\
+      \ \"EOF\"\n<IfModule mod_rewrite.c>\n  RewriteEngine On\n  RewriteCond %{HTTPS}\
+      \ !=on\n  RewriteRule ^/?(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]\n</IfModule>\n\
+      EOF'"
+    - a2enconf redirect-http-to-https
+    - apachectl configtest
+    - apachectl -k graceful
+    - ss -tlnp | grep ":443" || netstat -tlnp | grep ":443" || true
+    notes: Enables TLS 1.3-only vhost and HTTP->HTTPS redirect. Uses self-signed cert;
+      replace with CA cert if available. If apachectl is unavailable, use 'service
+      apache2 reload' or 'apache2ctl -k graceful'.
+  - step: 2
+    device: firewall
+    method: telnet
+    commands: &id030
+    - sysctl -w net.ipv4.ip_forward=1
+    - iptables -I FORWARD 1 -m state --state ESTABLISHED,RELATED -j ACCEPT
+    - iptables -I FORWARD 2 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 443 -j ACCEPT
+    - iptables -I FORWARD 3 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dport 80 -j REJECT
+      --reject-with tcp-reset
+    - iptables -L FORWARD -n --line-numbers
+    - 'sh -c ''iptables-save > /etc/iptables/rules.v4 || echo "Note: iptables persistence
+      not configured in this container"'''
+    notes: Rules are ordered to preserve state and allow HTTPS while rejecting HTTP.
+      Persistence path may vary; adjust as needed for the container.
+  validation_checks:
+  - check_id: val-1
+    description: Verify HTTPS with TLS 1.3 is negotiated from west-lan (workstation-1)
+      to apache-server.
+    type: active
+    source_device: workstation-1
+    commands:
+    - curl -k -sSvo /dev/null https://10.0.0.10 --tlsv1.3
+    - openssl s_client -connect 10.0.0.10:443 -tls1_3 -servername 10.0.0.10 < /dev/null
+      | grep -E "Protocol|Cipher" || true
+    success_criteria: Client connects successfully to https://10.0.0.10 and reports
+      TLSv1.3 in the negotiated protocol/cipher.
+  - check_id: val-2
+    description: Confirm TLS 1.2 (or lower) is rejected by the server policy.
+    type: active
+    source_device: workstation-1
+    commands:
+    - curl -k -sSvo /dev/null https://10.0.0.10 --tls-max 1.2 || true
+    success_criteria: Connection attempt with --tls-max 1.2 fails with handshake/unsupported
+      protocol error, indicating TLS 1.3-only is enforced.
+  - check_id: val-3
+    description: Ensure HTTP (tcp/80) from west-lan to apache-server is blocked by
+      firewall.
+    type: active
+    source_device: workstation-2
+    commands:
+    - curl -sv http://10.0.0.10/ 2>&1 | head -n 5 || true
+    - nc -zv 10.0.0.10 80 || true
+    success_criteria: No successful TCP/80 connection (connection reset/refused/timeout).
+      No HTTP content received.
+  - check_id: val-4
+    description: Verify firewall FORWARD chain contains the specific allow-443 and
+      reject-80 rules.
+    type: passive
+    source_device: firewall
+    commands:
+    - iptables -S FORWARD | sed -n '1,120p'
+    - iptables -L FORWARD -n --line-numbers | sed -n '1,120p'
+    success_criteria: FORWARD chain shows an ACCEPT rule for tcp/443 from 192.168.1.0/24
+      to 10.0.0.10 ordered before a REJECT rule for tcp/80 for the same source/destination.
+  - check_id: val-5
+    description: Confirm Apache SSL module and TLS 1.3 configuration are active.
+    type: passive
+    source_device: apache-server
+    commands:
+    - apachectl -M | grep -E "ssl_module|rewrite_module|headers_module"
+    - grep -E "^\s*SSLProtocol\s+TLSv1.3" /etc/apache2/sites-available/tls13.conf
+    - ss -tlnp | grep ":443" || netstat -tlnp | grep ":443" || true
+    success_criteria: ssl_module, rewrite_module, and headers_module are enabled;
+      TLSv1.3 is specified in the vhost; Apache is listening on TCP/443.
+  status:
+    translation: completed
+    resolution: completed
+    activation: failed
+    assurance: pending
+    last_updated: '2025-10-15T05:55:10.184745Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - 'Failed to run commands on apache-server: [Errno 61] Connection refused'
+  notes: This policy interprets the intent as securing access from west-lan (192.168.1.0/24)
+    to apache-server in east-lan (10.0.0.10) with TLS 1.3-only. If apache-server lacks
+    OpenSSL 1.1.1+ or Apache 2.4.36+, upgrade may be required. The HTTP redirect is
+    configured but traffic from west-lan to TCP/80 is blocked at the firewall to prevent
+    plaintext transit. Replace the self-signed certificate with a CA-issued certificate
+    if available.
+  activation_logs:
+  - device: firewall
+    commands: *id030
+    output:
+    - "sysctl -w net.ipv4.ip_forward=1\r\n\e[?2004l\rnet.ipv4.ip_forward = 1\r\n\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 1 -m state --state ESTABLISHED,RELATED -j AC\rCCEPT\r\n\
+      \e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 2 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dp\rport 443\
+      \ -j ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e\
+      [K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 3 -s 192.168.1.0/24 -d 10.0.0.10 -p tcp --dp\rport 80 -j\
+      \ REJECT --reject-with tcp-reset\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -L FORWARD -n --line-numbers\r\n\e[?2004l\rChain FORWARD (policy ACCEPT)\r\
+      \nnum  target     prot opt source               destination         \r\n1  \
+      \  ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED\r\
+      \n2    ACCEPT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443\r\
+      \n3    REJECT     6    --  192.168.1.0/24       10.0.0.10            tcp dpt:80\
+      \ reject-with tcp-reset\r\n4    ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0\
+      \            state RELATED,ESTABLISHED\r\n5    ACCEPT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:443\r\n6    REJECT     6    --  192.168.1.0/24\
+      \       10.0.0.10            tcp dpt:80 reject-with tcp-reset\r\n7    DROP \
+      \      1    --  10.0.0.0/24          192.168.1.0/24      \r\n8    ACCEPT   \
+      \  6    --  192.168.1.0/24       10.0.0.10            tcp dpt:443 state NEW,ESTABLISHED\r\
+      \n9    ACCEPT     6    --  10.0.0.10            192.168.1.0/24       tcp spt:443\
+      \ state ESTABLISHED\r\n10   REJECT     6    --  192.168.1.0/24       10.0.0.10\
+      \            tcp dpt:80 reject-with tcp-reset\r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "sh -c 'iptables-save > /etc/iptables/rules.v4 || echo \"Note: ipt\rtables persistence\
+      \ not configured in this container\"'\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+- policy_id: policy-https-webpage-ws1-to-apache-001
+  intent:
+    raw: Create a new webpage on the apache server that can be accessed via https
+      from workstation-1
+    summary: Publish a new HTTPS-served webpage on apache-server and allow access
+      from workstation-1.
+    assumptions:
+    - apache-server already has HTTPS (TLS) enabled and listening on TCP/443 (services
+      advertise http/https).
+    - IP addressing in the context is desired state; routers may require explicit
+      interface/IP and static route configuration.
+    - firewall is the default gateway for 192.168.1.0/24 and will route to 10.0.0.0/24
+      via R1.
+    - No NAT is required; pure routed connectivity is intended.
+    - Self-signed certificates may be in use; validation will use curl -k to ignore
+      certificate validation.
+  policy_rules:
+  - rule_id: rule-app-https-page
+    description: Create and publish a new webpage at /ans/index.html on apache-server
+      and ensure it is served over HTTPS.
+    targets:
+    - apache-server
+    action: configure-application
+    constraints:
+    - 'Document root: /var/www/html'
+    - 'Path: /ans/index.html'
+    - 'Service: HTTPS (TCP/443)'
+  - rule_id: rule-permit-ws1-to-apache-https
+    description: Permit HTTPS from workstation-1 (192.168.1.10) to apache-server (10.0.0.10)
+      through the firewall; allow established return traffic.
+    targets:
+    - firewall
+    action: allow
+    constraints:
+    - 'Source: 192.168.1.10/32'
+    - 'Destination: 10.0.0.10/32'
+    - 'Protocol/Port: TCP/443'
+    - 'State: NEW,ESTABLISHED for forward; ESTABLISHED,RELATED for return'
+    - 'LAN interface: eth1 (192.168.1.100/24)'
+    - 'WAN interface: eth0 (192.168.0.100/24)'
+  - rule_id: rule-routing-west-to-east
+    description: Ensure routed connectivity between west-lan (192.168.1.0/24) and
+      east-lan (10.0.0.0/24) via R1-R2 transit (172.16.0.0/30).
+    targets:
+    - R1
+    - R2
+    - firewall
+    action: configure-routing
+    constraints:
+    - R1 must route 10.0.0.0/24 via 172.16.0.2 (R2).
+    - R1 must route 192.168.1.0/24 via 192.168.0.100 (firewall).
+    - R2 must route 192.168.1.0/24 via 172.16.0.1 (R1).
+    - firewall must route 10.0.0.0/24 via 192.168.0.1 (R1).
+  enforcement_steps:
+  - step: 1
+    device: R1
+    method: telnet
+    commands: &id031
+    - enable
+    - configure terminal
+    - interface FastEthernet0/0
+    - ip address 192.168.0.1 255.255.255.0
+    - no shutdown
+    - exit
+    - interface Serial1/0
+    - ip address 172.16.0.1 255.255.255.252
+    - clock rate 64000
+    - no shutdown
+    - exit
+    - ip route 10.0.0.0 255.255.255.0 172.16.0.2
+    - ip route 192.168.1.0 255.255.255.0 192.168.0.100
+    - end
+    - write memory
+    notes: Clock rate will apply if R1 s1/0 is DCE; harmless if DTE. Ensures R1 has
+      correct addressing and routes for east/west.
+  - step: 2
+    device: R2
+    method: telnet
+    commands: &id032
+    - enable
+    - configure terminal
+    - interface FastEthernet0/0
+    - ip address 10.0.0.1 255.255.255.0
+    - no shutdown
+    - exit
+    - interface Serial1/0
+    - ip address 172.16.0.2 255.255.255.252
+    - no shutdown
+    - exit
+    - ip route 192.168.1.0 255.255.255.0 172.16.0.1
+    - end
+    - write memory
+    notes: R2 provides gateway for east-lan and a route back to west-lan via R1.
+  - step: 3
+    device: firewall
+    method: telnet
+    commands: &id033
+    - ip addr flush dev eth0
+    - ip addr flush dev eth1
+    - ip addr add 192.168.0.100/24 dev eth0
+    - ip addr add 192.168.1.100/24 dev eth1
+    - ip link set eth0 up
+    - ip link set eth1 up
+    - sysctl -w net.ipv4.ip_forward=1
+    - iptables -F
+    - iptables -t nat -F
+    - iptables -P INPUT DROP
+    - iptables -P FORWARD DROP
+    - iptables -P OUTPUT ACCEPT
+    - iptables -A INPUT -i lo -j ACCEPT
+    - iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    - iptables -A INPUT -p icmp -j ACCEPT
+    - iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
+    - iptables -A FORWARD -i eth1 -s 192.168.1.10/32 -o eth0 -d 10.0.0.10/32 -p tcp
+      --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT
+    - ip route add 10.0.0.0/24 via 192.168.0.1 dev eth0
+    notes: Allows only workstation-1 to initiate HTTPS to apache-server; default FORWARD
+      policy drops others. Established/related permits return traffic.
+  - step: 4
+    device: apache-server
+    method: telnet
+    commands: &id034
+    - ip addr flush dev eth0
+    - ip addr add 10.0.0.10/24 dev eth0
+    - ip link set eth0 up
+    - ip route replace default via 10.0.0.1
+    - mkdir -p /var/www/html/ans
+    - bash -lc "printf '%s\n' '<!doctype html><html><head><title>ANS Test</title></head><body><h1>ANS
+      Project Test Page</h1><p>Access via HTTPS successful from workstation-1.</p></body></html>'
+      > /var/www/html/ans/index.html"
+    - chmod 644 /var/www/html/ans/index.html
+    - service apache2 reload || systemctl reload apache2 || true
+    notes: Publishes the HTTPS page at https://10.0.0.10/ans/index.html. apache2 reload
+      is attempted; command variants included for portability.
+  validation_checks:
+  - check_id: val-r1-routing
+    description: Verify R1 has routes to east-lan and west-lan behind firewall.
+    type: show
+    source_device: R1
+    commands: &id035
+    - show ip route 10.0.0.0
+    - show ip route 192.168.1.0
+    success_criteria: R1 routing table shows 10.0.0.0/24 via 172.16.0.2 and 192.168.1.0/24
+      via 192.168.0.100.
+  - check_id: val-r2-routing
+    description: Verify R2 has route back to west-lan via R1.
+    type: show
+    source_device: R2
+    commands: &id036
+    - show ip route 192.168.1.0
+    success_criteria: R2 routing table shows 192.168.1.0/24 via 172.16.0.1.
+  - check_id: val-fw-rules
+    description: Confirm firewall forwards HTTPS only from workstation-1 to apache-server.
+    type: show
+    source_device: firewall
+    commands: &id037
+    - iptables -S
+    - iptables -C FORWARD -i eth1 -s 192.168.1.10/32 -o eth0 -d 10.0.0.10/32 -p tcp
+      --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT
+    success_criteria: iptables contains explicit rule permitting TCP/443 from 192.168.1.10
+      to 10.0.0.10 and default FORWARD policy is DROP with established return allowed.
+  - check_id: val-apache-https-listen
+    description: Confirm apache-server listens on TCP/443 and page exists.
+    type: show
+    source_device: apache-server
+    commands: &id038
+    - ss -tlnp | grep ':443 ' || netstat -tlnp | grep ':443 '
+    - test -f /var/www/html/ans/index.html && echo OK || echo MISSING
+    success_criteria: A process is listening on 0.0.0.0:443 or 10.0.0.10:443 and the
+      file /var/www/html/ans/index.html exists.
+  - check_id: val-ws1-https-access
+    description: Validate workstation-1 can fetch the new page over HTTPS.
+    type: active
+    source_device: workstation-1
+    commands: &id039
+    - curl -ks -o /tmp/ans_test.html -w '%{http_code} %{size_download}\n' https://10.0.0.10/ans/index.html
+    - grep -q 'ANS Project Test Page' /tmp/ans_test.html && echo CONTENT_OK || echo
+      CONTENT_MISSING
+    success_criteria: curl returns HTTP 200 with non-zero size and page content contains
+      'ANS Project Test Page'.
+  - check_id: val-ws2-https-deny
+    description: 'Optional negative test: workstation-2 should not be allowed to access
+      HTTPS (policy only permits workstation-1).'
+    type: active
+    source_device: workstation-2
+    commands: &id040
+    - curl -ks -o /dev/null -m 5 -w '%{http_code}\n' https://10.0.0.10/ans/index.html
+      || echo FAIL
+    success_criteria: Access from workstation-2 is not successful (curl does not return
+      200).
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T06:03:45.499385Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check val-r1-routing did not meet criteria 'R1 routing table shows
+      10.0.0.0/24 via 172.16.0.2 and 192.168.1.0/24 via 192.168.0.100.'
+    - Validation check val-r2-routing did not meet criteria 'R2 routing table shows
+      192.168.1.0/24 via 172.16.0.1.'
+    - Validation check val-fw-rules did not meet criteria 'iptables contains explicit
+      rule permitting TCP/443 from 192.168.1.10 to 10.0.0.10 and default FORWARD policy
+      is DROP with established return allowed.'
+    - Validation check val-apache-https-listen did not meet criteria 'A process is
+      listening on 0.0.0.0:443 or 10.0.0.10:443 and the file /var/www/html/ans/index.html
+      exists.'
+    - Validation check val-ws1-https-access did not meet criteria 'curl returns HTTP
+      200 with non-zero size and page content contains 'ANS Project Test Page'.'
+    - Validation check val-ws2-https-deny did not meet criteria 'Access from workstation-2
+      is not successful (curl does not return 200).'
+  notes: This policy configures routing on R1/R2, a selective HTTPS forwarding rule
+    on the firewall, and publishes a new page on apache-server. It intentionally restricts
+    HTTPS to workstation-1 only. If HTTPS is not already enabled on apache-server,
+    enable mod_ssl and a TLS vhost as appropriate. Firewall rule persistence may require
+    iptables-save depending on the container image.
+  activation_logs:
+  - device: R1
+    commands: *id031
+    output:
+    - "enable\r\n% Incomplete command.\r\n\r\nR1(config)#"
+    - "configure terminal\r\n                   ^\r\n% Invalid input detected at '^'\
+      \ marker.\r\n\r\nR1(config)#"
+    - "interface FastEthernet0/0\r\nR1(config-if)#"
+    - "ip address 192.168.0.1 255.255.255.0\r\nR1(config-if)#"
+    - "no shutdown\r\nR1(config-if)#"
+    - "exit\r\nR1(config)#"
+    - "interface Serial1/0\r\nR1(config-if)#"
+    - "ip address 172.16.0.1 255.255.255.252\r\nR1(config-if)#"
+    - "clock rate 64000\r\nR1(config-if)#"
+    - "no shutdown\r\nR1(config-if)#"
+    - "exit\r\nR1(config)#"
+    - "ip route 10.0.0.0 255.255.255.0 172.16.0.2\r\nR1(config)#"
+    - "ip route 192.168.1.0 255.255.255.0 192.168.0.100\r\nR1(config)#"
+    - "end\r\nR1#"
+    - "write memory\r\nWarning: Attempting to overwrite an NVRAM configuration previously\
+      \ written\r\nby a different version of the system image.\r\nOverwrite the previous\
+      \ NVRAM configuration?[confirm]"
+  - device: R2
+    commands: *id032
+    output:
+    - "enable\r\nR2#"
+    - "configure terminal\r\nEnter configuration commands, one per line.  End with\
+      \ CNTL/Z.\r\nR2(config)#"
+    - "interface FastEthernet0/0\r\nR2(config-if)#"
+    - "ip address 10.0.0.1 255.255.255.0\r\nR2(config-if)#"
+    - "no shutdown\r\nR2(config-if)#"
+    - "exit\r\nR2(config)#"
+    - "interface Serial1/0\r\nR2(config-if)#"
+    - "ip address 172.16.0.2 255.255.255.252\r\nR2(config-if)#"
+    - "no shutdown\r\nR2(config-if)#"
+    - "exit\r\nR2(config)#"
+    - "ip route 192.168.1.0 255.255.255.0 172.16.0.1\r\nR2(config)#"
+    - "end\r\nR2#"
+    - "write memory\r\nWarning: Attempting to overwrite an NVRAM configuration previously\
+      \ written\r\nby a different version of the system image.\r\nOverwrite the previous\
+      \ NVRAM configuration?[confirm]\r\n*Oct 15 04:58:50.701: %SYS-5-CONFIG_I: Configured\
+      \ from console by console\r\n[confirm]"
+  - device: firewall
+    commands: *id033
+    output:
+    - "ip addr flush dev eth0\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "ip addr flush dev eth1\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "ip addr add 192.168.0.100/24 dev eth0\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "ip addr add 192.168.1.100/24 dev eth1\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "ip link set eth0 up\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "ip link set eth1 up\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "sysctl -w net.ipv4.ip_forward=1\r\n\e[?2004l\rnet.ipv4.ip_forward = 1\r\n\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -F\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -t nat -F\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -P INPUT DROP\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -P FORWARD DROP\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -P OUTPUT ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#\
+      \ \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A INPUT -i lo -j ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT\rT\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A INPUT -p icmp -j ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCE\rEPT\r\n\e\
+      [?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -A FORWARD -i eth1 -s 192.168.1.10/32 -o eth0 -d 10.0.0\r0.10/32 -p\
+      \ tcp --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT\r\n\e[?2004l\r\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    - "ip route add 10.0.0.0/24 via 192.168.0.1 dev eth0\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/#"
+  - device: apache-server
+    commands: *id034
+    output:
+    - "ip addr flush dev eth0\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\e\
+      [?2004l\r\e[?2004hroot@apache-server:/#"
+    - "ip addr add 10.0.0.10/24 dev eth0\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "ip link set eth0 up\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/#"
+    - "ip route replace default via 10.0.0.1\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "mkdir -p /var/www/html/ans\r\n\e[?2004l\r\e[?2004hroot@apache-server:/# \r\n\
+      \e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "bash -lc \"printf '%s\\n' '<!doctype html><html><head><title>\r>ANS Test</title></head><body><h1>ANS\
+      \ Project Test Page</h1><p>Access via HTTPS s\rsuccessful from workstation-1.</p></body></html>'\
+      \ > /var/www/html/ans/index.html\"\r\"\r\n\e[?2004l\rbash: !doctype: event not\
+      \ found\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "chmod 644 /var/www/html/ans/index.html\r\n\e[?2004l\rchmod: cannot access '/var/www/html/ans/index.html':\
+      \ No such file or directory\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\
+      \e[?2004hroot@apache-server:/#"
+    - "service apache2 reload || systemctl reload apache2 || true \r\e[Aroot@apache-server:/#\
+      \ service apache2 reload || systemctl reload apache2 || tru\e[Ke\r\n\e[?2004l\r\
+      Reloading Apache httpd web server: apache2 \e[31mfailed!\e[0m\r\nApache2 is\
+      \ not running ... \e[33m(warning).\e[0m\r\nbash: systemctl: command not found\r\
+      \n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+  assurance_results:
+  - check_id: val-r1-routing
+    source_device: R1
+    commands: *id035
+    output:
+    - "[OK]\r\nR1#show ip route 10.0.0.0\r\nRouting entry for 10.0.0.0/24, 1 known\
+      \ subnets\r\nS        10.0.0.0 [1/0] via 172.16.0.2\r\nR1#"
+    - "show ip route 192.168.1.0\r\nRouting entry for 192.168.1.0/24\r\n  Known via\
+      \ \"static\", distance 1, metric 0\r\n  Routing Descriptor Blocks:\r\n  * 192.168.0.100\r\
+      \n      Route metric is 0, traffic share count is 1\r\nR1#"
+    success: false
+    criteria: R1 routing table shows 10.0.0.0/24 via 172.16.0.2 and 192.168.1.0/24
+      via 192.168.0.100.
+  - check_id: val-r2-routing
+    source_device: R2
+    commands: *id036
+    output:
+    - "[OK]\r\nR2#show ip route 192.168.1.0\r\nRouting entry for 192.168.1.0/24\r\n\
+      \  Known via \"static\", distance 1, metric 0\r\n  Routing Descriptor Blocks:\r\
+      \n  * 172.16.0.1\r\n      Route metric is 0, traffic share count is 1\r\nR2#"
+    success: false
+    criteria: R2 routing table shows 192.168.1.0/24 via 172.16.0.1.
+  - check_id: val-fw-rules
+    source_device: firewall
+    commands: *id037
+    output:
+    - "iptables -S\r\n\e[?2004l\r-P INPUT DROP\r\n-P FORWARD DROP\r\n-P OUTPUT ACCEPT\r\
+      \n-A INPUT -i lo -j ACCEPT\r\n-A INPUT -m state --state RELATED,ESTABLISHED\
+      \ -j ACCEPT\r\n-A INPUT -p icmp -j ACCEPT\r\n-A FORWARD -m state --state RELATED,ESTABLISHED\
+      \ -j ACCEPT\r\n-A FORWARD -s 192.168.1.10/32 -d 10.0.0.10/32 -i eth1 -o eth0\
+      \ -p tcp -m tcp --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT\r\n\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/#"
+    - "iptables -C FORWARD -i eth1 -s 192.168.1.10/32 -o eth0 -d 10.0.0\r0.10/32 -p\
+      \ tcp --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT\r\n\e[?2004l\r\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: iptables contains explicit rule permitting TCP/443 from 192.168.1.10
+      to 10.0.0.10 and default FORWARD policy is DROP with established return allowed.
+  - check_id: val-apache-https-listen
+    source_device: apache-server
+    commands: *id038
+    output:
+    - "ss -tlnp | grep ':443 ' || netstat -tlnp | grep ':443 '\r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    - "test -f /var/www/html/ans/index.html && echo OK || echo MIS\rSSING\r\n\e[?2004l\r\
+      MISSING\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#"
+    success: false
+    criteria: A process is listening on 0.0.0.0:443 or 10.0.0.10:443 and the file
+      /var/www/html/ans/index.html exists.
+  - check_id: val-ws1-https-access
+    source_device: workstation-1
+    commands: *id039
+    output:
+    - "curl -ks -o /tmp/ans_test.html -w '%{http_code} %{size_down\rnload}\\n' https://10.0.0.10/ans/index.html\r\
+      \n\e[?2004l"
+    - grep -q 'ANS Project Test Page' /tmp/ans_test.html && echo CONTENT_OK || echo
+      CONTENT_MISSING
+    success: false
+    criteria: curl returns HTTP 200 with non-zero size and page content contains 'ANS
+      Project Test Page'.
+  - check_id: val-ws2-https-deny
+    source_device: workstation-2
+    commands: *id040
+    output:
+    - "curl -ks -o /dev/null -m 5 -w '%{http_code}\\n' https://10.0\r0.0.10/ans/index.html\
+      \ || echo FAIL\r\n\e[?2004l"
+    success: false
+    criteria: Access from workstation-2 is not successful (curl does not return 200).
+- policy_id: pol-ans-allow-east-to-west-001
+  intent:
+    raw: allow all traffic from east LAN to west LAN
+    summary: Permit all protocols and ports sourced from east-lan (10.0.0.0/24) to
+      reach west-lan (192.168.1.0/24).
+    assumptions:
+    - No NAT is configured on the firewall; policy is purely routing and filtering.
+    - Device interface IPs are already configured as per topology.
+    - firewall eth0 is on 192.168.0.0/24 facing R1 and eth1 is on 192.168.1.0/24 facing
+      west-lan.
+    - Routers R1 and R2 have their serial interfaces up on 172.16.0.0/30.
+    - Default gateway on west-lan hosts is 192.168.1.100 (firewall), and on east-lan
+      hosts is 10.0.0.1 (R2).
+  policy_rules:
+  - rule_id: rule-01
+    description: Allow forwarding on the firewall from east-lan (via R1 side) to west-lan
+      for all protocols and ports.
+    targets:
+    - firewall
+    action: allow
+    constraints:
+    - 'Source subnet: 10.0.0.0/24 (east-lan)'
+    - 'Destination subnet: 192.168.1.0/24 (west-lan)'
+    - 'Ingress interface: eth0 (192.168.0.100/24 to R1 segment)'
+    - 'Egress interface: eth1 (192.168.1.100/24 to west-lan)'
+  - rule_id: rule-02
+    description: Ensure bidirectional routing path exists between east-lan and west-lan
+      to carry east->west flows and return traffic.
+    targets:
+    - R2
+    - R1
+    - firewall
+    action: route
+    constraints:
+    - R2 static route to 192.168.1.0/24 via 172.16.0.1 (R1)
+    - R1 static route to 10.0.0.0/24 via 172.16.0.2 (R2)
+    - R1 static route to 192.168.1.0/24 via 192.168.0.100 (firewall)
+    - firewall route to 10.0.0.0/24 via 192.168.0.1 (R1 on fw-r1 segment)
+  enforcement_steps:
+  - step: 1
+    device: R2
+    method: telnet
+    commands: &id041
+    - enable
+    - configure terminal
+    - ip route 192.168.1.0 255.255.255.0 172.16.0.1
+    - end
+    - write memory
+    notes: R2 forwards traffic from east-lan (10.0.0.0/24) towards R1 for west-lan
+      reachability over Serial1/0 (172.16.0.2 -> 172.16.0.1).
+  - step: 2
+    device: R1
+    method: telnet
+    commands: &id042
+    - enable
+    - configure terminal
+    - ip route 10.0.0.0 255.255.255.0 172.16.0.2
+    - ip route 192.168.1.0 255.255.255.0 192.168.0.100
+    - end
+    - write memory
+    notes: R1 knows how to reach east-lan via R2 and west-lan via the firewall on
+      192.168.0.100.
+  - step: 3
+    device: firewall
+    method: telnet
+    commands: &id043
+    - sysctl -w net.ipv4.ip_forward=1
+    - ip route add 10.0.0.0/24 via 192.168.0.1
+    - iptables -I FORWARD 1 -m state --state ESTABLISHED,RELATED -j ACCEPT
+    - iptables -I FORWARD 1 -i eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.1.0/24 -j ACCEPT
+    notes: Enable forwarding, add return route to east-lan via R1 (192.168.0.1), and
+      create explicit allow for east->west flows. Rules inserted at top of FORWARD
+      chain for precedence.
+  validation_checks:
+  - check_id: chk-01
+    description: Verify R2 has a static route to west-lan via R1.
+    type: cli-show
+    source_device: R2
+    commands: &id044
+    - show ip route 192.168.1.0
+    success_criteria: Route to 192.168.1.0/24 is present and points to 172.16.0.1
+      as a static route.
+  - check_id: chk-02
+    description: Verify R1 has static routes to east-lan via R2 and to west-lan via
+      firewall.
+    type: cli-show
+    source_device: R1
+    commands: &id045
+    - show ip route 10.0.0.0
+    - show ip route 192.168.1.0
+    success_criteria: Static route to 10.0.0.0/24 via 172.16.0.2 and to 192.168.1.0/24
+      via 192.168.0.100 are present.
+  - check_id: chk-03
+    description: Verify firewall forwarding rule and ip_forward setting.
+    type: cli-show
+    source_device: firewall
+    commands: &id046
+    - sysctl net.ipv4.ip_forward
+    - iptables -S FORWARD
+    - ip route show
+    success_criteria: net.ipv4.ip_forward=1; FORWARD chain contains an ACCEPT rule
+      for -i eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.1.0/24 and an ESTABLISHED,RELATED
+      rule; route to 10.0.0.0/24 via 192.168.0.1 exists.
+  - check_id: chk-04
+    description: End-to-end connectivity from east-lan host to west-lan hosts (ICMP).
+    type: active-test
+    source_device: apache-server
+    commands: &id047
+    - ping -c 3 192.168.1.10
+    - ping -c 3 192.168.1.20
+    - traceroute -n 192.168.1.10
+    success_criteria: Ping replies received from 192.168.1.10 and 192.168.1.20 (0%
+      packet loss). Traceroute completes within 5 hops and includes 192.168.1.100
+      as a hop.
+  status:
+    translation: completed
+    resolution: completed
+    activation: completed
+    assurance: failed
+    last_updated: '2025-10-15T06:07:37.939060Z'
+    resolution_details:
+    - All targets validated against current inventory.
+    activation_details:
+    - Commands executed on all targets
+    assurance_details:
+    - Validation check chk-01 did not meet criteria 'Route to 192.168.1.0/24 is present
+      and points to 172.16.0.1 as a static route.'
+    - Validation check chk-02 did not meet criteria 'Static route to 10.0.0.0/24 via
+      172.16.0.2 and to 192.168.1.0/24 via 192.168.0.100 are present.'
+    - Validation check chk-03 did not meet criteria 'net.ipv4.ip_forward=1; FORWARD
+      chain contains an ACCEPT rule for -i eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.1.0/24
+      and an ESTABLISHED,RELATED rule; route to 10.0.0.0/24 via 192.168.0.1 exists.'
+    - Validation check chk-04 did not meet criteria 'Ping replies received from 192.168.1.10
+      and 192.168.1.20 (0% packet loss). Traceroute completes within 5 hops and includes
+      192.168.1.100 as a hop.'
+  notes: This policy enables all east-lan (10.0.0.0/24) initiated traffic to reach
+    west-lan (192.168.1.0/24). It configures static routing on R1 and R2 and explicit
+    iptables forwarding on the firewall. No changes are made to allow west-lan initiated
+    sessions; return traffic is permitted via stateful rule. Persistence of iptables
+    rules across reloads is not handled here and may require iptables-persistent or
+    equivalent.
+  activation_logs:
+  - device: R2
+    commands: *id041
+    output:
+    - "enable\r\nR2#"
+    - "configure terminal\r\nEnter configuration commands, one per line.  End with\
+      \ CNTL/Z.\r\nR2(config)#"
+    - "ip route 192.168.1.0 255.255.255.0 172.16.0.1\r\nR2(config)#"
+    - "end\r\nR2#"
+    - "write memory\r\nBuilding configuration...\r\n[OK]\r\nR2#\r\n*Oct 15 05:02:24.317:\
+      \ %SYS-5-CONFIG_I: Configured from console by console\r\nR2#"
+  - device: R1
+    commands: *id042
+    output:
+    - "enable\r\nR1#"
+    - "configure terminal\r\nEnter configuration commands, one per line.  End with\
+      \ CNTL/Z.\r\nR1(config)#"
+    - "ip route 10.0.0.0 255.255.255.0 172.16.0.2\r\nR1(config)#"
+    - "ip route 192.168.1.0 255.255.255.0 192.168.0.100\r\nR1(config)#"
+    - "end\r\nR1#"
+    - "write memory\r\nBuilding configuration...\r\n[OK]\r\nR1#\r\n*Oct 15 05:01:26.557:\
+      \ %SYS-5-CONFIG_I: Configured from console by console\r\nR1#"
+  - device: firewall
+    commands: *id043
+    output:
+    - "sysctl -w net.ipv4.ip_forward=1\r\n\e[?2004l\rnet.ipv4.ip_forward = 1\r\n\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/#"
+    - "ip route add 10.0.0.0/24 via 192.168.0.1\r\n\e[?2004l\rRTNETLINK answers: File\
+      \ exists\r\n\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 1 -m state --state ESTABLISHED,RELATED -j AC\rCCEPT\r\n\
+      \e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\
+      \e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    - "iptables -I FORWARD 1 -i eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.\r.1.0/24 -j\
+      \ ACCEPT\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/# \e[K\r\
+      \n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+  assurance_results:
+  - check_id: chk-01
+    source_device: R2
+    commands: *id044
+    output:
+    - "show ip route 192.168.1.0\r\nRouting entry for 192.168.1.0/24\r\n  Known via\
+      \ \"static\", distance 1, metric 0\r\n  Routing Descriptor Blocks:\r\n  * 172.16.0.1\r\
+      \n      Route metric is 0, traffic share count is 1\r\nR2#"
+    success: false
+    criteria: Route to 192.168.1.0/24 is present and points to 172.16.0.1 as a static
+      route.
+  - check_id: chk-02
+    source_device: R1
+    commands: *id045
+    output:
+    - "show ip route 10.0.0.0\r\nRouting entry for 10.0.0.0/24, 1 known subnets\r\n\
+      S        10.0.0.0 [1/0] via 172.16.0.2\r\nR1#"
+    - "show ip route 192.168.1.0\r\nRouting entry for 192.168.1.0/24\r\n  Known via\
+      \ \"static\", distance 1, metric 0\r\n  Routing Descriptor Blocks:\r\n  * 192.168.0.100\r\
+      \n      Route metric is 0, traffic share count is 1\r\nR1#"
+    success: false
+    criteria: Static route to 10.0.0.0/24 via 172.16.0.2 and to 192.168.1.0/24 via
+      192.168.0.100 are present.
+  - check_id: chk-03
+    source_device: firewall
+    commands: *id046
+    output:
+    - "sysctl net.ipv4.ip_forward\r\n\e[?2004l\rnet.ipv4.ip_forward = 1\r\n\e[?2004h\e\
+      ]0;root@firewall: /\aroot@firewall:/# \e[K\r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/#"
+    - "iptables -S FORWARD\r\n\e[?2004l\r-P FORWARD DROP\r\n-A FORWARD -s 10.0.0.0/24\
+      \ -d 192.168.1.0/24 -i eth0 -o eth1 -j ACCEPT\r\n-A FORWARD -m state --state\
+      \ RELATED,ESTABLISHED -j ACCEPT\r\n-A FORWARD -m state --state RELATED,ESTABLISHED\
+      \ -j ACCEPT\r\n-A FORWARD -s 192.168.1.10/32 -d 10.0.0.10/32 -i eth1 -o eth0\
+      \ -p tcp -m tcp --dport 443 -m state --state NEW,ESTABLISHED -j ACCEPT\r\n\e\
+      [?2004h\e]0;root@firewall: /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/#"
+    - "ip route show\r\n\e[?2004l\r10.0.0.0/24 via 192.168.0.1 dev eth0 \r\n192.168.0.0/24\
+      \ dev eth0 proto kernel scope link src 192.168.0.100 \r\n192.168.1.0/24 dev\
+      \ eth1 proto kernel scope link src 192.168.1.100 \r\n\e[?2004h\e]0;root@firewall:\
+      \ /\aroot@firewall:/# \r\n\e[?2004l\r\e[?2004h\e]0;root@firewall: /\aroot@firewall:/#"
+    success: false
+    criteria: net.ipv4.ip_forward=1; FORWARD chain contains an ACCEPT rule for -i
+      eth0 -o eth1 -s 10.0.0.0/24 -d 192.168.1.0/24 and an ESTABLISHED,RELATED rule;
+      route to 10.0.0.0/24 via 192.168.0.1 exists.
+  - check_id: chk-04
+    source_device: apache-server
+    commands: *id047
+    output:
+    - "ping -c 3 192.168.1.10\r\n\e[?2004l\rPING 192.168.1.10 (192.168.1.10) 56(84)\
+      \ bytes of data.\r\n64 bytes from 192.168.1.10: icmp_seq=1 ttl=61 time=42.9\
+      \ ms"
+    - "ping -c 3 192.168.1.20\r\n\r\n64 bytes from 192.168.1.10: icmp_seq=2 ttl=61\
+      \ time=39.5 ms"
+    - "traceroute -n 192.168.1.10\r\n\r\n64 bytes from 192.168.1.10: icmp_seq=3 ttl=61\
+      \ time=35.9 ms\r\n\r\n--- 192.168.1.10 ping statistics ---\r\n3 packets transmitted,\
+      \ 3 received, 0% packet loss, time 2003ms\r\nrtt min/avg/max/mdev = 35.929/39.461/42.928/2.857\
+      \ ms\r\n\e[?2004hroot@apache-server:/# \r\n\e[?2004l\r\e[?2004hroot@apache-server:/#\
+      \ ping -c 3 192.168.1.20\r\n\e[?2004l\rPING 192.168.1.20 (192.168.1.20) 56(84)\
+      \ bytes of data.\r\n64 bytes from 192.168.1.20: icmp_seq=1 ttl=61 time=39.6\
+      \ ms"
+    success: false
+    criteria: Ping replies received from 192.168.1.10 and 192.168.1.20 (0% packet
+      loss). Traceroute completes within 5 hops and includes 192.168.1.100 as a hop.
