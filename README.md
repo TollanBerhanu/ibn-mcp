@@ -50,7 +50,7 @@ This project demonstrates the Model Context Protocol with:
    # Or create a .env file with: OPENAI_API_KEY=your-api-key-here
    ```
 
-4. (Optional) Set up your GNS3 server:
+4. Set up your GNS3 server:
    ```bash
    export GNS3_SERVER="http://your-gns3-server:port"
    ```
@@ -100,24 +100,6 @@ Once connected, you can ask questions like:
 - "Start all nodes in project 'My Network'"
 - "Connect to GNS3 server"
 
-## Project Structure
-
-```
-ibn-mcp/
-├── client.py                 # MCP client implementation
-├── server/
-│   ├── __init__.py
-│   ├── __main__.py           # Server entry point
-│   ├── weather.py            # Weather API server
-│   ├── server.py             # Demo server
-│   └── gns3_mcp.py           # GNS3 network topology server
-├── __init__.py               # Package initialization
-├── pyproject.toml            # Project configuration
-├── README.md                 # This file
-└── .gitignore
-```
-
-## Development
 
 ### Setting up development environment
 
@@ -135,15 +117,6 @@ uv run isort src/ tests/
 # Lint code
 uv run flake8 src/ tests/
 ```
-
-### Adding New Tools
-
-To add new tools to the server:
-
-1. Create a new function in the appropriate server file
-2. Decorate it with `@mcp.tool()`
-3. Add proper type hints and docstrings
-4. The client will automatically discover and use the new tool
 
 ## API Reference
 
@@ -187,21 +160,3 @@ Start all nodes in a project.
 #### `stop_project_nodes(project_name: str) -> str`
 Stop all nodes in a project.
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Run the test suite
-6. Submit a pull request
-
-## License
-
-[Add your license here]
-
-## Acknowledgments
-
-- Model Context Protocol (MCP) specification
-- National Weather Service API
-- OpenAI API
